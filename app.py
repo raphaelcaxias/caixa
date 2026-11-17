@@ -197,6 +197,9 @@ def segredo(*chaves):
 @st.cache_resource
 def banco():
     cred, planilha = segredo("gcp_service_account"), segredo("planilha", "endereco")
+    if not cred and segredo("gcp_json"):
+        import json
+        cred = json.loads(str(segredo("gcp_json")))  # o arquivo .json do Google colado inteiro
     if cred and planilha:
         return BancoSheets(cred, str(planilha))
     return BancoLocal(os.path.join(PASTA, "dados"))
