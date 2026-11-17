@@ -1,5 +1,6 @@
 # Caixa Jardim do Éden — versão Streamlit
 # Vendas, estoque e produtos guardados numa planilha do Google (ou em arquivos locais para teste).
+import base64
 import hashlib
 import hmac
 import io
@@ -32,21 +33,147 @@ ABAS = {
     "Caixa": ["id", "data", "loja", "tipo", "valor", "obs", "usuario"],
 }
 NUMEROS = {"custo", "preco", "subtotal", "desconto", "total", "recebido", "troco", "qtd", "valor"}
+M_HOJE, M_VENDER, M_CAIXA = ":material/home: Início", ":material/point_of_sale: Vender", ":material/payments: Caixa"
+M_EST, M_VENDAS = ":material/inventory_2: Estoque", ":material/receipt_long: Vendas"
+M_PROD, M_PAINEL = ":material/sell: Produtos", ":material/monitoring: Painel"
+M_MAIS = ":material/more_horiz: Mais"
 HORAS_LOGIN = 14  # o login vale por um dia de trabalho, mesmo recarregando a página
 
 st.set_page_config(page_title="Caixa Jardim do Éden", page_icon=os.path.join(PASTA, "logo.png"),
                    layout="wide", initial_sidebar_state="collapsed")
 
-st.markdown("""
+with open(os.path.join(PASTA, "logo.png"), "rb") as _f:
+    LOGO64 = base64.b64encode(_f.read()).decode()
+
+VINHO, VINHO_E, OURO, OURO_C, CREME, TINTA, LINHA = "#7A1726", "#4A0E18", "#C98A12", "#F2C46B", "#FBF6EC", "#2A1E14", "#EADCC3"
+st.markdown(f"""
 <style>
-.block-container{padding-top:3.2rem;padding-bottom:3rem;max-width:1200px}
-div[data-testid="stMetricValue"]{font-size:1.6rem}
-.preco{font-weight:800;color:#8A5F12;font-size:1.1rem}
-.total-grande{font-size:2.2rem;font-weight:900;color:#2A1E14}
-.sub{color:#7A6A55;font-size:.9rem}
-.stButton>button,.stFormSubmitButton>button{min-height:3rem;font-weight:700}
-input{font-size:16px!important}
-@media(max-width:640px){.block-container{padding-left:.8rem;padding-right:.8rem}}
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Nunito+Sans:wght@400;600;700;800;900&display=swap');
+html{{font-size:19px}}
+html,body,.stApp,button,input,textarea,select,[data-testid="stMarkdownContainer"]{{font-family:'Nunito Sans',system-ui,sans-serif}}
+.stApp{{background:radial-gradient(1200px 500px at 10% -10%,#F7E3C4 0%,transparent 60%),linear-gradient(180deg,{CREME} 0%,#F4E8D4 100%)}}
+header[data-testid="stHeader"]{{background:transparent;height:0;min-height:0}}
+[data-testid="stToolbar"],[data-testid="stDecoration"],#MainMenu,footer{{display:none!important}}
+.block-container{{padding-top:1.1rem;padding-bottom:4rem;max-width:1180px}}
+h1,h2,h3,h4{{font-family:'Cormorant Garamond',Georgia,serif!important;color:{VINHO_E};letter-spacing:.2px}}
+h3{{font-size:2rem!important}} h4{{font-size:1.55rem!important}}
+p,li,label,[data-testid="stCaptionContainer"]{{color:#4A3A33}}
+/* barra do topo */
+.st-key-topo{{background:linear-gradient(120deg,{VINHO_E} 0%,{VINHO} 70%,#93202F 100%);border-radius:22px;padding:12px 16px;box-shadow:0 12px 30px rgba(74,14,24,.28)}}
+.st-key-topo [data-baseweb="select"]>div{{background:rgba(255,255,255,.12)!important;border:1px solid rgba(242,196,107,.55)!important;color:#FFF4E2!important;border-radius:14px!important;min-height:3rem}}
+.st-key-topo [data-baseweb="select"] *{{color:#FFF4E2!important;fill:#FFF4E2!important;font-weight:800}}
+.st-key-topo button{{background:rgba(255,255,255,.12)!important;color:#FFF4E2!important;border:1px solid rgba(242,196,107,.55)!important}}
+.marca{{display:flex;align-items:center;gap:14px}}
+.marca img{{width:56px;height:56px;border-radius:50%;border:2px solid {OURO};box-shadow:0 0 0 4px rgba(242,196,107,.15)}}
+.marca .t1{{font-family:'Cormorant Garamond',serif;font-size:1.75rem;font-weight:700;line-height:1;color:#FFF4E2}}
+.marca .t2{{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:{OURO_C};font-weight:900;margin-bottom:3px}}
+/* menu */
+.st-key-menu [data-testid="stElementContainer"],.st-key-menu [data-testid="stButtonGroup"],.st-key-menu [role="radiogroup"]{{width:100%!important}}
+.st-key-submenu [data-testid="stElementContainer"],.st-key-submenu [data-testid="stButtonGroup"],.st-key-submenu [role="radiogroup"]{{width:100%!important}}
+.st-key-submenu button{{flex:1 1 0}}
+.st-key-menu [data-testid="stButtonGroup"]>div{{width:100%;gap:8px;flex-wrap:wrap}}
+.st-key-menu button{{flex:1 1 auto;min-height:3.3rem;border-radius:14px!important;border:1px solid {LINHA}!important;background:#fff!important;color:{TINTA}!important;font-weight:800!important;font-size:1rem!important;box-shadow:0 2px 8px rgba(60,40,10,.05)}}
+.st-key-menu button[data-testid="stBaseButton-segmented_controlActive"],.st-key-menu button[aria-checked="true"]{{background:{VINHO}!important;color:#FFF4E2!important;border-color:{VINHO}!important;box-shadow:0 8px 18px rgba(122,23,38,.28)}}
+.st-key-menu button[data-testid="stBaseButton-segmented_controlActive"] *,[data-testid="stBaseButton-segmented_controlActive"] *,[data-testid="stBaseButton-pillsActive"] *{{color:#FFF4E2!important}}
+.st-key-topo button *,.st-key-topo button{{color:#FFF4E2!important;opacity:1!important}}
+[data-testid="stButtonGroup"] button[aria-checked="true"],[data-testid="stButtonGroup"] button[data-selected="true"]{{background:{VINHO}!important;border-color:{VINHO}!important;box-shadow:0 6px 14px rgba(122,23,38,.25)}}
+[data-testid="stButtonGroup"] button[aria-checked="true"] *,[data-testid="stButtonGroup"] button[data-selected="true"] *{{color:#FFF4E2!important}}
+.st-key-grade button p,.st-key-grade button div{{white-space:normal!important;overflow:visible!important;text-overflow:clip!important}}
+/* botões */
+.stButton>button,.stFormSubmitButton>button,.stLinkButton>a,.stDownloadButton>button{{border-radius:14px!important;min-height:3.2rem;font-weight:800!important;font-size:1rem;border:1.5px solid {LINHA}!important;background:#fff!important;color:{TINTA}!important;transition:transform .08s,box-shadow .15s}}
+.stButton>button:hover,.stFormSubmitButton>button:hover,.stLinkButton>a:hover{{border-color:{OURO}!important;box-shadow:0 6px 16px rgba(201,138,18,.18)}}
+.stButton>button:active{{transform:translateY(1px)}}
+button[data-testid="stBaseButton-primary"],button[data-testid="stBaseButton-primaryFormSubmit"],a[data-testid="stBaseLinkButton-primary"],button[kind="primary"],button[kind="primaryFormSubmit"]{{background:linear-gradient(135deg,{OURO} 0%,#E3A92A 100%)!important;border:0!important;color:#2A1A00!important;box-shadow:0 8px 20px rgba(201,138,18,.35)!important}}
+/* grupos de escolha (vendedor, pagamento…) */
+[data-testid="stButtonGroup"] button{{min-height:3rem;font-weight:800;border-radius:12px!important}}
+[data-testid="stBaseButton-segmented_controlActive"],[data-testid="stBaseButton-pillsActive"]{{background:{VINHO}!important;color:#FFF4E2!important;border-color:{VINHO}!important}}
+/* campos */
+[data-baseweb="input"],[data-baseweb="base-input"],[data-baseweb="select"]>div,[data-baseweb="textarea"]{{border-radius:14px!important;background:#fff!important;border-color:{LINHA}!important}}
+[data-baseweb="input"]:focus-within,[data-baseweb="select"]>div:focus-within{{border-color:{OURO}!important;box-shadow:0 0 0 3px rgba(201,138,18,.18)!important}}
+[data-baseweb="input"]>div,[data-baseweb="base-input"],input,textarea{{background:#fff!important}}
+input{{font-size:17px!important;font-weight:700!important;color:{TINTA}!important}}
+/* cartões de número */
+[data-testid="stMetric"]{{background:#fff;border:1px solid {LINHA};border-radius:20px;padding:16px 18px;box-shadow:0 6px 18px rgba(60,40,10,.06)}}
+[data-testid="stMetricLabel"] p{{font-weight:800;color:#8A7A65;text-transform:uppercase;font-size:.75rem!important;letter-spacing:.06em}}
+[data-testid="stMetricValue"]{{font-weight:900;color:{TINTA};font-size:1.75rem!important}}
+/* caixas brancas */
+.st-key-carrinho,.st-key-cartao,.st-key-login{{background:#fff;border:1px solid {LINHA};border-radius:24px;padding:20px;box-shadow:0 14px 34px rgba(60,40,10,.10)}}
+[data-testid="stForm"]{{background:#fff;border:1px solid {LINHA}!important;border-radius:20px;padding:18px}}
+[data-testid="stDataFrame"]{{border-radius:16px;overflow:hidden;border:1px solid {LINHA}}}
+/* texto dos botões: grande e sem cortar */
+.stButton>button p,.stFormSubmitButton>button p,.stLinkButton>a p,.stDownloadButton>button p,[data-testid="stButtonGroup"] button p{{font-size:1.05rem!important;font-weight:800!important}}
+.stButton>button div,.stButton>button p,.stLinkButton>a div,.stLinkButton>a p{{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.2}}
+.st-key-menu button p{{font-size:1.05rem!important}}
+[class*="st-key-esc_"] .stButton>button p{{font-size:1.15rem!important}}
+.st-key-acoes .stButton>button p{{font-size:1.25rem!important}}
+.st-key-concluir .stButton>button p{{font-size:1.35rem!important}}
+.st-key-grade .stButton>button p{{font-size:.95rem!important;font-weight:700!important}}
+/* passos da venda */
+.passo{{display:flex;align-items:center;gap:10px;font-weight:900;font-size:1.15rem;color:{VINHO_E};margin:14px 0 8px}}
+.passo span{{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:{VINHO};color:#FFF4E2;font-size:1rem;flex:none}}
+.vazio{{text-align:center;color:#8A7A65;padding:28px 10px;font-size:1.05rem;border:2px dashed {LINHA};border-radius:18px}}
+.item-n{{font-weight:900;font-size:1.05rem;color:{TINTA};margin-top:10px;line-height:1.25}}
+.item-p{{color:#6A5A45;font-size:.95rem;margin-bottom:4px}}
+.qtd{{text-align:center;font-size:1.6rem;font-weight:900;color:{TINTA}}}
+.st-key-itens [data-testid="stHorizontalBlock"],[class*="st-key-esc_"] [data-testid="stHorizontalBlock"],.st-key-acoes [data-testid="stHorizontalBlock"]{{flex-wrap:nowrap!important;gap:.5rem!important}}
+.st-key-itens [data-testid="stColumn"],[class*="st-key-esc_"] [data-testid="stColumn"],.st-key-acoes [data-testid="stColumn"]{{flex:1 1 0!important;min-width:0!important;width:auto!important}}
+.st-key-itens{{border-bottom:1px dashed {LINHA};padding-bottom:10px}}
+[class*="st-key-esc_"] .stButton>button{{min-height:3.8rem;font-size:1.1rem!important}}
+.st-key-acoes .stButton>button{{min-height:5rem;font-size:1.2rem!important;border-radius:20px!important}}
+.total-box{{background:linear-gradient(135deg,#FFF8EA,#FBEFD6);border:1px solid #EBCB8B;border-radius:20px;padding:14px 18px;margin:12px 0 4px;text-align:center}}
+.total-l{{font-weight:900;letter-spacing:.2em;color:#8A5F12;font-size:.85rem}}
+.total-d{{color:#8A5F12;font-weight:700}}
+.troco{{background:#EAF6EC;border:1px solid #9FD3A8;color:#1F5A2A;border-radius:16px;padding:12px 16px;font-size:1.35rem;text-align:center;margin:8px 0}}
+.st-key-concluir .stButton>button{{min-height:4.4rem;font-size:1.3rem!important;background:linear-gradient(135deg,#2E7D3A,#3D9A4B)!important;color:#fff!important;box-shadow:0 10px 24px rgba(46,125,58,.35)!important;margin-top:10px}}
+.st-key-concluir .stButton>button *{{color:#fff!important}}
+.st-key-lista .stButton>button{{justify-content:flex-start;text-align:left;min-height:4rem;white-space:normal}}
+.st-key-lista .stButton>button p,.st-key-lista .stButton>button div{{text-align:left;white-space:normal!important}}
+.st-key-submenu button{{min-height:2.9rem;border-radius:12px!important}}
+.ok-card{{display:flex;gap:18px;align-items:center;background:linear-gradient(135deg,#2E7D3A,#3D9A4B);color:#fff;border-radius:24px;padding:26px 24px;margin:8px 0 16px;box-shadow:0 14px 34px rgba(46,125,58,.3)}}
+.ok-ic{{width:70px;height:70px;border-radius:50%;background:rgba(255,255,255,.2);display:grid;place-items:center;font-size:2.4rem;font-weight:900;flex:none}}
+.ok-t{{font-family:'Cormorant Garamond',serif;font-size:2.4rem;font-weight:700;line-height:1}}
+.ok-s{{font-size:1.2rem;font-weight:700;opacity:.95;margin-top:4px}}
+.ok-troco{{font-size:1.5rem;font-weight:900;margin-top:6px;color:#FFF4C8}}
+[data-testid="stAlert"] p{{font-size:1.05rem}}
+/* busca grande */
+.st-key-busca input{{font-size:1.3rem!important;min-height:3.6rem}}
+.st-key-login [data-testid="stForm"]{{border:0!important;padding:0;background:transparent}}
+.st-key-busca [data-testid="stForm"]{{border:0!important;padding:0;background:transparent}}
+/* atalhos de produto */
+.st-key-grade .stButton>button{{min-height:5.4rem;white-space:normal;text-align:left;justify-content:flex-start;line-height:1.25;padding:10px 14px;font-size:.92rem}}
+.st-key-grade .stButton>button p{{text-align:left}}
+.preco{{font-weight:900;color:#8A5F12;font-size:1.15rem}}
+.total-grande{{font-size:2.6rem;font-weight:900;color:{VINHO_E};line-height:1.1}}
+.sub{{color:#7A6A55;font-size:.9rem}}
+.saud{{font-family:'Cormorant Garamond',serif;font-size:2.3rem;font-weight:700;color:{VINHO_E};line-height:1.1;margin:.2rem 0 0}}
+.data{{color:#8A7A65;font-weight:700;margin-bottom:.6rem}}
+hr{{border-color:{LINHA}!important}}
+@media(max-width:640px){{
+ html{{font-size:18px}}
+ .block-container{{padding-left:.7rem;padding-right:.7rem}}
+ .marca img{{width:44px;height:44px}} .marca .t1{{font-size:1.4rem}}
+ .st-key-menu [data-testid="stButtonGroup"]>div{{flex-wrap:nowrap!important;gap:4px}}
+ .st-key-menu button{{flex:1 1 0!important;min-width:0;min-height:3.6rem;font-size:.72rem!important;padding:4px 2px!important;flex-direction:column}}
+ .st-key-menu button [data-testid="stIconMaterial"]{{font-size:1.5rem!important}}
+ .st-key-menu button span[data-has-shortcut]{{flex-direction:column!important;gap:2px!important;align-items:center}}
+ .st-key-menu button p{{font-size:.72rem!important;white-space:nowrap!important;letter-spacing:-.01em}}
+ .st-key-menu button *{{overflow:visible!important;text-overflow:clip!important;max-width:none!important}}
+ .st-key-topo [data-testid="stHorizontalBlock"]{{gap:.7rem!important}}
+ .marca{{margin-bottom:4px}}
+ .st-key-acoes .stButton>button{{min-height:4.4rem}}
+ .st-key-acoes .stButton>button p{{font-size:1.05rem!important}}
+ [class*="st-key-esc_"] .stButton>button p{{font-size:1.05rem!important}}
+ .st-key-grade .stButton>button p{{font-size:.8rem!important}}
+ .ok-t{{font-size:1.9rem}} .ok-ic{{width:54px;height:54px;font-size:1.8rem}}
+ .st-key-kpis [data-testid="stHorizontalBlock"]{{flex-wrap:wrap!important;gap:.6rem}}
+ .st-key-kpis [data-testid="stColumn"]{{flex:1 1 calc(50% - .6rem)!important;min-width:calc(50% - .6rem)!important;width:auto!important}}
+ .st-key-acoes [data-testid="stHorizontalBlock"]{{gap:.5rem}}
+ .st-key-grade [data-testid="stHorizontalBlock"]{{flex-wrap:nowrap!important;gap:.4rem}}
+ .st-key-grade [data-testid="stColumn"]{{flex:1 1 0!important;min-width:0!important;width:auto!important}}
+ .st-key-grade .stButton>button{{min-height:5rem;font-size:.78rem;padding:8px}}
+ [data-testid="stMetricValue"]{{font-size:1.4rem!important}}
+ .total-grande{{font-size:2.1rem}}
+}}
 </style>""", unsafe_allow_html=True)
 
 
@@ -194,15 +321,29 @@ def segredo(*chaves):
         return None
 
 
-@st.cache_resource
-def banco():
-    cred, planilha = segredo("gcp_service_account"), segredo("planilha", "endereco")
+def credenciais():
+    cred = segredo("gcp_service_account")
     if not cred and segredo("gcp_json"):
         import json
         cred = json.loads(str(segredo("gcp_json")))  # o arquivo .json do Google colado inteiro
-    if cred and planilha:
-        return BancoSheets(cred, str(planilha))
+    return dict(cred) if cred else None
+
+
+@st.cache_resource(show_spinner=False)
+def _sheets(planilha, email):
+    return BancoSheets(credenciais(), planilha)
+
+
+@st.cache_resource(show_spinner=False)
+def _local():
     return BancoLocal(os.path.join(PASTA, "dados"))
+
+
+def banco():
+    cred, planilha = credenciais(), segredo("planilha", "endereco")
+    if cred and planilha:
+        return _sheets(str(planilha), cred.get("client_email", ""))
+    return _local()
 
 
 @st.cache_data(ttl=45, show_spinner=False)
@@ -283,15 +424,25 @@ def ler_token(t):
 
 
 def tela_login():
-    _, meio, _ = st.columns([1, 1.3, 1])
-    with meio:
-        st.image(os.path.join(PASTA, "logo.png"), width=150)
-        st.markdown("### Caixa Jardim do Éden")
-        st.caption("Digite seu usuário e senha.")
-        with st.form("login"):
-            u = st.text_input("Usuário", placeholder="ex.: norma").strip().lower()
-            s = st.text_input("Senha", type="password")
-            ok = st.form_submit_button("Entrar", type="primary", width="stretch")
+    _, meio, _ = st.columns([1, 1.25, 1])
+    with meio, st.container(key="login"):
+        st.markdown(f"""<div style="text-align:center">
+          <img src="data:image/png;base64,{LOGO64}" style="width:132px;height:132px;border-radius:50%;
+               border:3px solid {OURO};box-shadow:0 12px 30px rgba(74,14,24,.25)">
+          <div style="font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;color:{OURO};font-weight:900;margin-top:14px">Caixa</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:2.4rem;font-weight:700;color:{VINHO_E};line-height:1">Jardim do Éden</div>
+          <div style="color:#8A7A65;margin:6px 0 10px">Toque no seu nome e digite a senha</div></div>""",
+                    unsafe_allow_html=True)
+        nomes = list(usuarios())
+        with st.form("login", border=False):
+            u = st.pills("Quem está entrando?", nomes, default=nomes[0] if len(nomes) == 1 else None,
+                         format_func=lambda n: n.capitalize(), key="login_user")
+            s = st.text_input("Senha", type="password", placeholder="••••••")
+            ok = st.form_submit_button("Entrar", type="primary", width="stretch", icon=":material/login:")
+        if ok and not u:
+            st.error("Toque no seu nome.")
+            return
+        u = (u or "").lower()
         if ok:
             senha = usuarios().get(u)
             if senha is not None and hmac.compare_digest(senha.encode(), s.encode()):
@@ -334,124 +485,225 @@ def por_no_carrinho(p):
     else:
         cart.append({"id": p["id"], "nome": p["nome"], "preco": float(p["preco"]), "qtd": 1})
     st.session_state.ultima = None
-    st.toast(f"➕ {p['nome']}")
+    st.toast(f"Adicionado: {p['nome']}", icon=":material/add_shopping_cart:")
+
+
+FORMAS_BOTAO = [("Dinheiro", ":material/payments:"), ("Pix", ":material/qr_code_2:"),
+                ("Crédito", ":material/credit_card:"), ("Débito", ":material/credit_card:")]
+
+
+def grade_botoes(opcoes, chave, colunas=2):
+    """Botões grandes para escolher (o escolhido fica dourado)."""
+    escolhido = st.session_state.get(chave)
+    with st.container(key=f"esc_{chave}"):
+        cols = st.columns(colunas)
+        for n, op in enumerate(opcoes):
+            nome, icone = op if isinstance(op, tuple) else (op, None)
+            if cols[n % colunas].button(nome, key=f"{chave}_{nome}", width="stretch", icon=icone,
+                                        type="primary" if escolhido == nome else "secondary"):
+                st.session_state[chave] = nome
+                st.rerun()
+    return escolhido
 
 
 def tela_vender(loja):
     st.session_state.setdefault("carrinho", [])
     st.session_state.setdefault("resultados", [])
-    if st.session_state.get("ultima"):
+    cart = st.session_state.carrinho
+
+    # ---- venda acabou de ser feita
+    if st.session_state.get("ultima") and not cart:
         u = st.session_state.ultima
-        c1, c2 = st.columns([3, 1], vertical_alignment="center")
-        c1.success(f"✅ Venda {u['id']} registrada: {brl(u['total'])} · {NOME_FORMA[u['forma']]} · {u['vendedor']}")
-        c2.link_button("📲 Comprovante no WhatsApp", link_whats(texto_comprovante(u)), width="stretch")
+        st.markdown(f"""<div class='ok-card'><div class='ok-ic'>✓</div><div>
+            <div class='ok-t'>Venda feita!</div>
+            <div class='ok-s'>{brl(u['total'])} · {NOME_FORMA[u['forma']]} · {u['vendedor']}</div>
+            {f"<div class='ok-troco'>Troco: {brl(u['troco'])}</div>" if u['forma'] == 'dinheiro' and float(u['troco']) > 0 else ""}
+            </div></div>""", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        if c1.button("Nova venda", type="primary", width="stretch", icon=":material/add_shopping_cart:"):
+            st.session_state.ultima = None
+            st.rerun()
+        c2.link_button("Mandar comprovante no WhatsApp", link_whats(texto_comprovante(u)), width="stretch",
+                       icon=":material/send:")
+        return
+
     if caixa_estado(loja)["situacao"] != "aberto":
-        st.info("O caixa desta loja está fechado. Dá para vender, mas abra o caixa em **💰 Caixa** "
-                "para conferir o dinheiro no fim do dia.", icon="💡")
+        st.info("O caixa está fechado. Pode vender normalmente, mas lembre de **abrir o caixa**.", icon=":material/info:")
     prods = produtos_ativos()
     est = estoque()
-    esq, dir_ = st.columns([1.35, 1], gap="large")
+    esq, dir_ = st.columns([1.2, 1], gap="large")
 
     with esq:
-        with st.form("busca", clear_on_submit=True, border=False):
-            c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
-            q = c1.text_input("Código de barras, nome ou valor",
-                              placeholder="Passe o leitor, digite o nome ou o valor (ex.: 129)")
-            enviar = c2.form_submit_button("Buscar", width="stretch")
+        st.markdown("<div class='passo'><span>1</span> O que a cliente vai levar?</div>", unsafe_allow_html=True)
+        with st.container(key="busca"), st.form("busca", clear_on_submit=True, border=False):
+            c1, c2 = st.columns([3.2, 1.3], vertical_alignment="bottom")
+            q = c1.text_input("Procurar", label_visibility="collapsed",
+                              placeholder="Nome, código ou preço (ex.: 129)")
+            enviar = c2.form_submit_button("Procurar", type="primary", width="stretch", icon=":material/search:")
+        focar_busca()
         if enviar:
             tipo, achados = buscar(q, prods)
             if tipo == "codigo" or (tipo == "preco" and len(achados) == 1):
                 por_no_carrinho(achados[0])
                 st.session_state.resultados = []
+                st.rerun()
             elif not achados:
                 st.session_state.resultados = []
                 if q.strip():
-                    st.warning(f"Nada encontrado para “{q}”.")
+                    st.warning(f"Não achei “{q}”. Tente outra palavra ou só o preço.")
             else:
                 st.session_state.resultados = [dict(r) for r in achados]
-                if tipo == "preco":
-                    st.info(f"{len(achados)} produtos com esse valor — toque no que a cliente levou.")
 
         res = st.session_state.resultados
         if res:
-            st.caption(f"{len(res)} resultado(s)")
-            for i, p in enumerate(res):
-                c1, c2, c3 = st.columns([3, 1.2, 1.1], vertical_alignment="center")
-                q_est = int(est.get((loja, p["id"]), 0))
-                c1.markdown(f"**{p['nome']}**  \n<span class='sub'>{q_est} em estoque</span>",
-                            unsafe_allow_html=True)
-                c2.markdown(f"<span class='preco'>{brl(p['preco'])}</span>", unsafe_allow_html=True)
-                if c3.button("Adicionar", key=f"add{i}{p['id']}", width="stretch"):
-                    por_no_carrinho(p)
-                    st.session_state.resultados = []
-                    st.rerun()
-        elif not st.session_state.carrinho:
-            st.caption("Dica: digite só o valor (ex.: 189) para ver os produtos desse preço. "
-                       "Se só existir um, ele já entra na venda.")
+            c1, c2 = st.columns([3, 1], vertical_alignment="center")
+            c1.markdown(f"**{len(res)} encontrado(s)** — toque no produto certo:")
+            if c2.button("Fechar", width="stretch", icon=":material/close:"):
+                st.session_state.resultados = []
+                st.rerun()
+            with st.container(key="lista"):
+                for i, p in enumerate(res):
+                    q_est = int(est.get((loja, p["id"]), 0))
+                    txt = f"{p['nome']}  \n**{brl(p['preco'])}** · {f'{q_est} em estoque' if q_est > 0 else 'sem estoque'}"
+                    if st.button(txt, key=f"add{i}{p['id']}", width="stretch", icon=":material/add_circle:"):
+                        por_no_carrinho(p)
+                        st.session_state.resultados = []
+                        st.rerun()
+        elif cart:
+            with st.expander("Atalhos de produtos", icon=":material/apps:"):
+                atalhos(prods, est, loja)
+        else:
+            atalhos(prods, est, loja)
 
-    with dir_:
-        with st.container(border=True):
-            cart = st.session_state.carrinho
-            st.markdown(f"#### Venda · {loja}")
-            if not cart:
-                st.caption("Nenhum item ainda.")
+    with dir_, st.container(key="carrinho"):
+        st.markdown(f"<div class='passo'><span>2</span> Venda · {loja}</div>", unsafe_allow_html=True)
+        if not cart:
+            st.markdown("<div class='vazio'>Nenhum produto ainda.<br>Procure ao lado ou toque num atalho.</div>",
+                        unsafe_allow_html=True)
+            return
+        with st.container(key="itens"):
             for i, it in enumerate(list(cart)):
-                c1, c2, c3 = st.columns([2.6, 1.1, .6], vertical_alignment="center")
-                c1.markdown(f"**{it['nome']}**  \n<span class='sub'>{brl(it['preco'])} cada</span>",
+                st.markdown(f"<div class='item-n'>{it['nome']}</div>"
+                            f"<div class='item-p'>{brl(it['preco'])} cada · <b>{brl(it['preco'] * it['qtd'])}</b></div>",
                             unsafe_allow_html=True)
-                nq = c2.number_input("Qtd", min_value=1, max_value=999, value=int(it["qtd"]), step=1,
-                                     key=f"q{it['id']}_{it['qtd']}", label_visibility="collapsed")
-                if nq != it["qtd"]:
-                    it["qtd"] = int(nq)
+                c1, c2, c3, c4 = st.columns([1, 1, 1, 1.3], vertical_alignment="center")
+                if c1.button("", key=f"menos{it['id']}", icon=":material/remove:", width="stretch", help="Tirar 1"):
+                    if it["qtd"] > 1:
+                        it["qtd"] -= 1
+                    else:
+                        cart.pop(i)
                     st.rerun()
-                if c3.button("✕", key=f"rm{it['id']}", help="Tirar da venda"):
+                c2.markdown(f"<div class='qtd'>{it['qtd']}</div>", unsafe_allow_html=True)
+                if c3.button("", key=f"mais{it['id']}", icon=":material/add:", width="stretch", help="Pôr mais 1"):
+                    it["qtd"] += 1
+                    st.rerun()
+                if c4.button("Tirar", key=f"rm{it['id']}", icon=":material/delete:", width="stretch"):
                     cart.pop(i)
                     st.rerun()
-            subtotal = round(sum(it["preco"] * it["qtd"] for it in cart), 2)
-            desconto = 0.0
-            if cart:
-                d1, d2 = st.columns([1, 2], vertical_alignment="bottom")
-                tipo_d = d1.segmented_control("Desconto em", ["R$", "%"], default="R$", key="tipo_desc") or "R$"
-                vd = d2.number_input("Desconto", min_value=0.0, value=0.0, step=1.0, format="%.2f", key="desconto",
-                                     label_visibility="collapsed")
-                desconto = round(subtotal * min(vd, 100) / 100, 2) if tipo_d == "%" else min(vd, subtotal)
-                if desconto:
-                    st.caption(f"Desconto: {brl(desconto)}")
-            total = round(subtotal - desconto, 2)
-            st.markdown(f"<div class='sub'>Total</div><div class='total-grande'>{brl(total)}</div>",
-                        unsafe_allow_html=True)
 
-            if cart:
-                vend = st.segmented_control("Quem vendeu?", VENDEDORES, key="vendedor")
-                forma_n = st.segmented_control("Forma de pagamento", list(FORMAS), key="forma")
-                recebido, troco = total, 0.0
-                if forma_n == "Dinheiro":
-                    recebido = st.number_input("Valor recebido (R$)", min_value=0.0, value=float(total),
-                                               step=5.0, format="%.2f", key=f"rec{total}")
-                    troco = round(recebido - total, 2)
-                    if troco > 0:
-                        st.success(f"Troco: **{brl(troco)}**")
-                if st.button("Finalizar venda", type="primary", width="stretch"):
-                    erro = None
-                    if not vend:
-                        erro = "Escolha quem vendeu."
-                    elif not forma_n:
-                        erro = "Escolha a forma de pagamento."
-                    elif forma_n == "Dinheiro" and recebido < total:
-                        erro = "O valor recebido é menor que o total."
-                    if erro:
-                        st.error(erro)
-                    else:
-                        finalizar(loja, vend, FORMAS[forma_n], subtotal, desconto, total, recebido, troco)
-                if st.button("Limpar venda", width="stretch"):
-                    limpar_venda()
-                    st.rerun()
+        subtotal = round(sum(it["preco"] * it["qtd"] for it in cart), 2)
+        desconto = 0.0
+        if st.toggle("Dar desconto", key="com_desc"):
+            d1, d2 = st.columns([1, 1.6], vertical_alignment="bottom")
+            tipo_d = d1.segmented_control("Desconto em", ["R$", "%"], default="R$", key="tipo_desc") or "R$"
+            vd = d2.number_input("Quanto?", min_value=0.0, value=0.0, step=1.0, format="%.2f", key="desconto")
+            desconto = round(subtotal * min(vd, 100) / 100, 2) if tipo_d == "%" else min(vd, subtotal)
+        total = round(subtotal - desconto, 2)
+        st.markdown(f"<div class='total-box'><div class='total-l'>TOTAL</div><div class='total-grande'>{brl(total)}</div>"
+                    + (f"<div class='total-d'>desconto de {brl(desconto)}</div>" if desconto else "") + "</div>",
+                    unsafe_allow_html=True)
+
+        st.markdown("<div class='passo'><span>3</span> Quem vendeu?</div>", unsafe_allow_html=True)
+        vend = grade_botoes(VENDEDORES, "vendedor")
+        st.markdown("<div class='passo'><span>4</span> Como a cliente pagou?</div>", unsafe_allow_html=True)
+        forma_n = grade_botoes(FORMAS_BOTAO, "forma")
+
+        recebido, troco = total, 0.0
+        if forma_n == "Dinheiro":
+            st.markdown("**Quanto a cliente deu?**")
+            notas = [n for n in (20, 50, 100, 200) if n >= total][:3]
+            ops = ["Valor certo"] + [f"R$ {n}" for n in notas] + ["Outro"]
+            if st.session_state.get("deu") not in ops:
+                st.session_state.deu = "Valor certo"
+            deu = grade_botoes(ops, "deu", colunas=min(len(ops), 3))
+            if deu == "Outro":
+                recebido = st.number_input("Valor que a cliente deu (R$)", min_value=0.0, value=float(total),
+                                           step=10.0, format="%.2f", key=f"rec{total}")
+            elif deu and deu.startswith("R$"):
+                recebido = float(deu[3:])
+            troco = round(recebido - total, 2)
+            if troco > 0:
+                st.markdown(f"<div class='troco'>Troco: <b>{brl(troco)}</b></div>", unsafe_allow_html=True)
+
+        with st.container(key="concluir"):
+            if st.button(f"Concluir venda · {brl(total)}", type="primary", width="stretch", icon=":material/check_circle:"):
+                erro = None
+                if not vend:
+                    erro = "Toque em quem vendeu (passo 3)."
+                elif not forma_n:
+                    erro = "Toque em como a cliente pagou (passo 4)."
+                elif forma_n == "Dinheiro" and recebido < total:
+                    erro = "O dinheiro que a cliente deu é menor que o total."
+                if erro:
+                    st.error(erro, icon=":material/error:")
+                else:
+                    finalizar(loja, vend, {"Dinheiro": "dinheiro", "Pix": "pix", "Crédito": "credito",
+                                           "Débito": "debito"}[forma_n], subtotal, desconto, total, recebido, troco)
+        if st.button("Cancelar esta venda", width="stretch", icon=":material/close:"):
+            limpar_venda()
+            st.rerun()
+
+
+def focar_busca():
+    """Deixa o cursor na busca (no computador), para o leitor de código de barras já funcionar."""
+    js = """
+    const d = window.parent.document;
+    setTimeout(() => {
+      const i = d.querySelector('.st-key-busca input');
+      const a = d.activeElement;
+      if (i && window.parent.innerWidth > 900 && (!a || !['INPUT','TEXTAREA'].includes(a.tagName))) i.focus();
+    }, 350); // %s
+    """ % time.time()
+    try:
+        st.html(f"<script>{js}</script>", unsafe_allow_javascript=True)
+    except TypeError:  # Streamlit mais antigo
+        import streamlit.components.v1 as components
+        components.html(f"<script>{js}</script>", height=0)
+
+
+def atalhos(prods, est, loja):
+    """Botões grandes dos produtos que mais saem — é só tocar, sem digitar."""
+    it = carregar("Itens")
+    v = carregar("Vendas")
+    ok = set(v.loc[v["status"] != "cancelada", "id"])
+    it = it[it["venda_id"].isin(ok) & it["produto_id"].isin(prods["id"])]
+    ids = list(it.groupby("produto_id")["qtd"].sum().sort_values(ascending=False).head(12).index)
+    titulo = "Mais vendidos"
+    if len(ids) < 4:
+        faixa = prods[prods["nome"].str.startswith(("LINGERIE", "PRÓTESE"))].sort_values("preco")
+        ids += [i for i in faixa["id"] if i not in ids][:12 - len(ids)]
+        titulo = "Atalhos"
+    if not ids:
+        st.caption("Dica: digite só o valor (ex.: 189) para ver os produtos desse preço.")
+        return
+    st.markdown(f"**{titulo}** <span class='sub'>· toque para pôr na venda</span>", unsafe_allow_html=True)
+    base = prods.set_index("id")
+    with st.container(key="grade"):
+        cols = st.columns(3)
+        for n, pid in enumerate(ids[:12]):
+            p = base.loc[pid]
+            q_est = int(est.get((loja, pid), 0))
+            txt_est = f"{q_est} em est." if q_est > 0 else "sem estoque"
+            if cols[n % 3].button(f"{p['nome'][:38]}  \n**{brl(p['preco'])}** · {txt_est}", key=f"at{pid}",
+                                  width="stretch"):
+                por_no_carrinho(dict(p, id=pid))
+                st.rerun()
 
 
 def limpar_venda():
     st.session_state.carrinho = []
     st.session_state.resultados = []
-    for k in [k for k in st.session_state if k in ("desconto", "forma", "vendedor", "tipo_desc") or str(k).startswith("rec")]:
+    for k in [k for k in st.session_state if k in ("desconto", "forma", "tipo_desc", "deu", "com_desc") or str(k).startswith("rec")]:
         st.session_state.pop(k, None)
 
 
@@ -484,7 +736,7 @@ def tela_produtos():
     st.markdown("#### Produtos e preços")
     st.caption("Regra da casa: preço = custo × 5, terminando em 9,99. O custo só aparece nesta tela.")
 
-    with st.expander("➕ Cadastrar produto novo"):
+    with st.expander("Cadastrar produto novo", icon=":material/add_box:"):
         with st.form("novo", clear_on_submit=True):
             nome = st.text_input("Nome do produto")
             c1, c2, c3 = st.columns(3)
@@ -541,7 +793,7 @@ def tela_produtos():
             "ativo": st.column_config.CheckboxColumn("À venda"),
         })
     c1, c2 = st.columns(2)
-    if c1.button("💾 Salvar alterações", type="primary", width="stretch"):
+    if c1.button("Salvar alterações", type="primary", width="stretch", icon=":material/save:"):
         base = prods.set_index("id")
         mudou = 0
         for _, r in editado.iterrows():
@@ -576,8 +828,7 @@ def tela_estoque(loja):
     est = estoque()
     st.markdown(f"#### Estoque · {loja}")
     opcoes = {f"{r['nome']} — {brl(r['preco'])}": r for _, r in prods.iterrows()}
-    t1, t2 = st.tabs(["📦 Chegou mercadoria", "🔢 Contagem (acertar estoque)"] if eh_dona() else
-                     ["📦 Chegou mercadoria", "🔢 Contagem (só a dona)"])
+    t1, t2 = st.tabs([":material/local_shipping: Chegou mercadoria", ":material/fact_check: Contagem"])
     with t1, st.form("entrada", clear_on_submit=True):
         esc = st.selectbox("Produto", list(opcoes), index=None, placeholder="Digite para procurar…")
         qtd = st.number_input("Quantidade que chegou", min_value=1, step=1)
@@ -721,7 +972,7 @@ def tela_painel(loja_atual):
     com_custo = it[it["produto_id"].map(custos).fillna(0) > 0]
     lucro = (com_custo["total"] - com_custo["qtd"] * com_custo["produto_id"].map(custos)).sum()
     desc_rateio = v["desconto"].sum()
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5 = st.container(key="kpis").columns(5)
     m1.metric("Total vendido", brl(tot), delta)
     m2.metric("Vendas", n)
     m3.metric("Venda média", brl(tot / n if n else 0))
@@ -775,7 +1026,7 @@ def tela_painel(loja_atual):
         hora.index = [f"{h:02d}h" for h in hora.index]
         st.bar_chart(hora, color="#7A1726", y_label="R$", x_label="")
 
-    st.download_button("⬇️ Baixar estas vendas em Excel", excel(v, it),
+    st.download_button("Baixar estas vendas em Excel", icon=":material/download:", data=excel(v, it),
                        file_name=f"vendas-{per.lower().replace(' ', '-')}-{agora():%Y-%m-%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -858,7 +1109,7 @@ def tela_caixa(loja):
     if e["situacao"] != "aberto":
         if e["situacao"] == "fechado":
             st.caption(f"Último caixa: {e['inicio']:%d/%m %H:%M} até {e['fim']:%H:%M}.")
-            st.link_button("📲 Reenviar o resumo desse caixa", link_whats(texto_resumo(loja, e)))
+            st.link_button("Reenviar o resumo desse caixa", link_whats(texto_resumo(loja, e)), icon=":material/send:")
         with st.form("abrir"):
             st.markdown("**Abrir o caixa**")
             ini = st.number_input("Quanto tem de dinheiro na gaveta agora? (troco)", min_value=0.0, step=10.0,
@@ -872,7 +1123,7 @@ def tela_caixa(loja):
     st.caption(f"Aberto desde {e['inicio']:%d/%m às %H:%M} · começou com {brl(e['inicial'])}")
     if e["inicio"].date() < agora().date():
         st.warning("Este caixa é de outro dia. Feche agora e abra um novo.")
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3 = st.container(key="kpis").columns(3)
     m1.metric("Vendido no caixa", brl(v["total"].sum()), f"{len(v)} venda(s)", delta_color="off")
     m2.metric("Dinheiro na gaveta", brl(e["esperado"]), help="Troco inicial + vendas em dinheiro + reforços − retiradas")
     m3.metric("Pix + cartões", brl(sum(e["por"].get(k, 0) for k in ("pix", "credito", "debito"))))
@@ -907,15 +1158,16 @@ def tela_caixa(loja):
         st.dataframe(mv[["hora", "o_que", "valor", "obs", "usuario"]], hide_index=True, width="stretch",
                      column_config={"hora": "Hora", "o_que": "", "valor": "Valor",
                                     "obs": "Motivo", "usuario": "Quem"})
-    st.link_button("📲 Mandar o resumo parcial no WhatsApp", link_whats(texto_resumo(loja, e)))
+    st.link_button("Mandar o resumo parcial no WhatsApp", link_whats(texto_resumo(loja, e)), icon=":material/send:")
 
 
 # ---------------------------------------------------------------- HOJE (tela inicial)
 def tela_hoje(loja):
     h = agora()
     saud = "Bom dia" if h.hour < 12 else "Boa tarde" if h.hour < 18 else "Boa noite"
-    st.markdown(f"### {saud}, {st.session_state.usuario.capitalize()}! 👋")
-    st.caption(f"{loja} · {h:%d/%m/%Y}")
+    dias = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+    st.markdown(f"<div class='saud'>{saud}, {st.session_state.usuario.capitalize()}!</div>"
+                f"<div class='data'>{loja} · {dias[h.weekday()]}, {h:%d/%m/%Y}</div>", unsafe_allow_html=True)
     if st.session_state.pop("fechou", False):
         e = caixa_estado(loja)
         if e["situacao"] == "fechado":
@@ -923,7 +1175,8 @@ def tela_hoje(loja):
             (st.success if abs(d) < 0.005 else st.warning)(
                 "Caixa fechado. " + ("O dinheiro conferiu ✅" if abs(d) < 0.005 else
                                      (f"Sobrou {brl(d)}." if d > 0 else f"Faltou {brl(-d)}.")))
-            st.link_button("📲 Mandar o resumo do dia no WhatsApp", link_whats(texto_resumo(loja, e)), type="primary")
+            st.link_button("Mandar o resumo do dia no WhatsApp", link_whats(texto_resumo(loja, e)), type="primary",
+                           icon=":material/send:")
 
     vh, _, _ = vendas_periodo("Hoje", loja)
     vh = vh[vh["status"] != "cancelada"]
@@ -931,23 +1184,30 @@ def tela_hoje(loja):
     vo = vo[vo["status"] != "cancelada"]
     t, to = vh["total"].sum(), vo["total"].sum()
     e = caixa_estado(loja)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Vendido hoje", brl(t), f"{(t - to) / to * 100:+.0f}% vs. ontem" if to else None)
+    with st.container(key="acoes"):
+        b1, b2 = st.columns(2)
+        if b1.button("Nova venda", type="primary", width="stretch", icon=":material/add_shopping_cart:"):
+            st.session_state.ir = M_VENDER
+            st.rerun()
+        if b2.button("Fechar o caixa" if e["situacao"] == "aberto" else "Abrir o caixa", width="stretch",
+                     icon=":material/point_of_sale:"):
+            st.session_state.ir = M_CAIXA
+            st.rerun()
+        b3, b4 = st.columns(2)
+        if b3.button("Chegou mercadoria", width="stretch", icon=":material/local_shipping:"):
+            st.session_state.ir = M_EST
+            st.rerun()
+        if b4.button("Vendas de hoje", width="stretch", icon=":material/receipt_long:"):
+            st.session_state.ir = M_MAIS
+            st.session_state.sub = M_VENDAS
+            st.rerun()
+
+    m1, m2, m3, m4 = st.container(key="kpis").columns(4)
+    m1.metric("Vendido hoje", brl(t), f"{(t - to) / to * 100:+.0f}% que ontem" if to else None)
     m2.metric("Vendas hoje", len(vh))
     m3.metric("Venda média", brl(t / len(vh) if len(vh) else 0))
     m4.metric("Caixa", {"aberto": "Aberto", "fechado": "Fechado", "nunca": "Fechado"}[e["situacao"]],
               f"desde {e['inicio']:%H:%M}" if e["situacao"] == "aberto" else None, delta_color="off")
-
-    b1, b2, b3 = st.columns(3)
-    if b1.button("🛒 Nova venda", type="primary", width="stretch"):
-        st.session_state.ir = "🛒 Vender"
-        st.rerun()
-    if b2.button("💰 " + ("Fechar o caixa" if e["situacao"] == "aberto" else "Abrir o caixa"), width="stretch"):
-        st.session_state.ir = "💰 Caixa"
-        st.rerun()
-    if b3.button("📦 Chegou mercadoria", width="stretch"):
-        st.session_state.ir = "📦 Estoque"
-        st.rerun()
 
     c1, c2 = st.columns(2)
     with c1:
@@ -972,7 +1232,7 @@ def tela_hoje(loja):
         p["estoque"] = p["id"].apply(lambda i: int(est.get((loja, i), 0)))
         p = p[p["estoque"] <= 2].sort_values(["estoque", "nome"])
         if p.empty:
-            st.caption("Nada acabando. 🎉" if ja_teve else "Lance o estoque em 📦 Estoque para ver o que está acabando.")
+            st.caption("Nada acabando. 🎉" if ja_teve else "Lance o estoque em Estoque para ver o que está acabando.")
         else:
             st.dataframe(p[["nome", "estoque"]], hide_index=True, width="stretch", height=min(38 * len(p) + 40, 360),
                          column_config={"nome": "Produto", "estoque": "Restam"})
@@ -993,50 +1253,57 @@ def main():
         st.error(f"Não consegui abrir a planilha. Confira a internet e a configuração. ({e})")
         st.stop()
 
-    topo1, topo2, topo3 = st.columns([3, 2, 1], vertical_alignment="center")
-    with topo1:
-        a, b = st.columns([1, 6], vertical_alignment="center")
-        a.image(os.path.join(PASTA, "logo.png"), width=52)
-        b.markdown("**Jardim do Éden** · caixa")
+    topo = st.container(key="topo")
+    topo1, topo2, topo3 = topo.columns([3, 2, 1.1], vertical_alignment="center")
+    topo1.markdown(f"<div class='marca'><img src='data:image/png;base64,{LOGO64}'><div>"
+                   f"<div class='t2'>Caixa · {'Dona' if eh_dona() else 'Vendedora'}</div><div class='t1'>Jardim do Éden</div></div></div>",
+                   unsafe_allow_html=True)
     if "loja" not in st.session_state:
         q = st.query_params.get("loja", "")
         st.session_state.loja = LOJAS[int(q)] if q.isdigit() and int(q) < len(LOJAS) else LOJAS[0]
     loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
     st.query_params["loja"] = str(LOJAS.index(loja))
-    with topo3.popover(f"👤 {st.session_state.usuario}", width="stretch"):
-        if st.button("🔄 Atualizar dados", width="stretch"):
+    with topo3.popover(st.session_state.usuario.capitalize(), width="stretch", icon=":material/person:"):
+        if st.button("Atualizar dados", width="stretch", icon=":material/refresh:"):
             gravou()
             st.rerun()
-        if st.button("Sair", width="stretch"):
+        if st.button("Sair", width="stretch", icon=":material/logout:"):
             st.session_state.clear()
             st.query_params.pop("k", None)
             st.rerun()
     if isinstance(banco(), BancoLocal):
-        st.warning("Modo de teste: os dados estão em arquivos nesta máquina. "
-                   "Para usar online nas duas lojas, ligue a planilha do Google (veja o LEIA-ME).", icon="⚠️")
+        falta = [n for n, ok in [("a chave do Google (gcp_json ou gcp_service_account)", credenciais()),
+                                 ("o endereço da planilha ([planilha] endereco)", segredo("planilha", "endereco"))] if not ok]
+        st.warning("**Modo de teste** — as vendas NÃO estão indo para a planilha. Falta nos Secrets: "
+                   + " e ".join(falta) + ". Depois de salvar os Secrets, clique em **Manage app → ⋮ → Reboot app**.",
+                   icon=":material/warning:")
 
-    menu = ["🏠 Hoje", "🛒 Vender", "💰 Caixa", "📦 Estoque", "🧾 Vendas"]
-    if eh_dona():
-        menu += ["🏷️ Produtos", "📊 Painel"]
+    menu = [M_HOJE, M_VENDER, M_CAIXA, M_EST, M_MAIS]
     if "ir" in st.session_state:
         st.session_state.tela = st.session_state.pop("ir")
     if st.session_state.get("tela") not in menu:
-        st.session_state.tela = "🏠 Hoje"
-    tela = st.segmented_control("Menu", menu, key="tela", label_visibility="collapsed") or "🏠 Hoje"
-    st.divider()
-    if tela == "🏠 Hoje":
+        st.session_state.tela = M_HOJE
+    with st.container(key="menu"):
+        tela = st.segmented_control("Menu", menu, key="tela", label_visibility="collapsed", width="stretch") or M_HOJE
+    if tela == M_MAIS:
+        sub_menu = [M_VENDAS] + ([M_PROD, M_PAINEL] if eh_dona() else [])
+        if st.session_state.get("sub") not in sub_menu:
+            st.session_state.sub = M_VENDAS
+        with st.container(key="submenu"):
+            tela = st.segmented_control("Mais", sub_menu, key="sub", label_visibility="collapsed", width="stretch") or M_VENDAS
+    if tela == M_HOJE:
         tela_hoje(loja)
-    elif tela == "💰 Caixa":
+    elif tela == M_CAIXA:
         tela_caixa(loja)
-    elif tela == "🛒 Vender":
+    elif tela == M_VENDER:
         tela_vender(loja)
-    elif tela == "📦 Estoque":
+    elif tela == M_EST:
         tela_estoque(loja)
-    elif tela == "🏷️ Produtos" and eh_dona():
+    elif tela == M_PROD and eh_dona():
         tela_produtos()
-    elif tela == "🧾 Vendas":
+    elif tela == M_VENDAS:
         tela_vendas(loja)
-    elif eh_dona():
+    elif tela == M_PAINEL and eh_dona():
         tela_painel(loja)
 
 
