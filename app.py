@@ -394,11 +394,16 @@ def produtos_ativos():
 LOGIN_LOJA_PADRAO = {"aterrado": "Aterrado", "vila": "Vila Santa Cecília"}
 
 
+SENHA_PADRAO = "241618"
+
+
 def usuarios():
-    u = segredo("usuarios")
-    if u:
-        return {str(k).lower(): str(v) for k, v in dict(u).items()}
-    return {"aterrado": "1234", "vila": "1234", "norma": "241618"}  # só para teste, sem Secrets
+    """Só as lojas entram. Senha de cada loja: a dos Secrets ou, se não tiver, a mesma da norma (241618)."""
+    u = {str(k).lower(): str(v) for k, v in dict(segredo("usuarios") or {}).items()}
+    padrao = u.get("norma") or SENHA_PADRAO
+    for login in list(dict(segredo("lojas") or {})) + list(LOGIN_LOJA_PADRAO):
+        u.setdefault(str(login).lower(), padrao)
+    return {k: v for k, v in u.items() if loja_do_login(k)}
 
 
 def loja_do_login(u=None):
@@ -413,24 +418,12 @@ def loja_do_login(u=None):
 
 
 def nome_login(u):
-    l = loja_do_login(u)
-    if l:
-        return f"Loja {l}"
-    return f"{u.capitalize()} (dona)" if papel(u) == "dona" else u.capitalize()
-
-
-def papel(u=None):
-    u = u or st.session_state.get("usuario", "")
-    p = segredo("papeis", u)
-    if p:
-        return str(p).lower()
-    if u == "norma":
-        return "dona"
-    return "loja" if loja_do_login(u) else "vendedora"
+    return f"Loja {loja_do_login(u)}"
 
 
 def eh_dona():
-    return papel() == "dona"
+    """Todas as lojas têm acesso completo (produtos, custo, cancelar venda, painel de tudo junto)."""
+    return bool(loja_do_login())
 
 
 def _chave():
@@ -465,7 +458,7 @@ def tela_login():
           <div style="font-family:'Cormorant Garamond',serif;font-size:2.4rem;font-weight:700;color:{VINHO_E};line-height:1">Jardim do Éden</div>
           <div style="color:#8A7A65;margin:6px 0 10px">Toque na sua loja e digite a senha</div></div>""",
                     unsafe_allow_html=True)
-        nomes = sorted(usuarios(), key=lambda n: (loja_do_login(n) is None, LOJAS.index(loja_do_login(n)) if loja_do_login(n) else 0, n))
+        nomes = sorted(usuarios(), key=lambda n: LOJAS.index(loja_do_login(n)))
         with st.form("login", border=False):
             u = st.pills("Qual loja?", nomes, default=nomes[0] if len(nomes) == 1 else None,
                          format_func=nome_login, key="login_user")
@@ -987,14 +980,10 @@ def excel(vendas, itens):
 
 
 def tela_painel(loja_atual):
-    dona = eh_dona()
-    if dona:
-        st.markdown("#### Painel")
-        loja = st.segmented_control("Ver", ["Todas", *LOJAS], default="Todas", key="painel_loja",
-                                    format_func=lambda l: "Tudo junto" if l == "Todas" else l) or "Todas"
-    else:
-        loja = loja_atual
-        st.markdown(f"#### Indicadores · {loja}")
+    dona = True  # todas as lojas veem os próprios números e o total das duas
+    st.markdown("#### Indicadores")
+    loja = st.segmented_control("Ver", [*LOJAS, "Todas"], default=loja_atual, key="painel_loja",
+                                format_func=lambda l: "Tudo junto" if l == "Todas" else l) or loja_atual
     per = st.segmented_control("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"],
                                default="7 dias", key="painel_per") or "7 dias"
     v, a, b = vendas_periodo(per, loja)
@@ -1322,7 +1311,7 @@ def main():
     topo = st.container(key="topo")
     topo1, topo2, topo3 = topo.columns([3, 2, 1.1], vertical_alignment="center")
     topo1.markdown(f"<div class='marca'><img src='data:image/png;base64,{LOGO64}'><div>"
-                   f"<div class='t2'>{'Caixa · Dona' if eh_dona() else 'Loja ' + (loja_do_login() or '')}</div><div class='t1'>Jardim do Éden</div></div></div>",
+                   f"<div class='t2'>Loja {loja_do_login() or ''}</div><div class='t1'>Jardim do Éden</div></div></div>",
                    unsafe_allow_html=True)
     fixa = loja_do_login()
     if fixa:
@@ -1334,7 +1323,7 @@ def main():
             st.session_state.loja = LOJAS[int(q)] if q.isdigit() and int(q) < len(LOJAS) else LOJAS[0]
         loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
         st.query_params["loja"] = str(LOJAS.index(loja))
-    with topo3.popover("Dona" if eh_dona() else "Conta", width="stretch", icon=":material/person:"):
+    with topo3.popover("Conta", width="stretch", icon=":material/person:"):
         if st.button("Atualizar dados", width="stretch", icon=":material/refresh:"):
             gravou()
             st.rerun()
