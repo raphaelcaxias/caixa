@@ -56,6 +56,7 @@ header[data-testid="stHeader"]{{background:transparent;height:0;min-height:0}}
 [data-testid="stToolbar"],[data-testid="stDecoration"],#MainMenu,footer{{display:none!important}}
 .block-container{{padding-top:1.1rem;padding-bottom:4rem;max-width:1180px}}
 h1,h2,h3,h4{{font-family:'Cormorant Garamond',Georgia,serif!important;color:{VINHO_E};letter-spacing:.2px}}
+[data-testid="stHeaderActionElements"]{{display:none!important}}
 h3{{font-size:2rem!important}} h4{{font-size:1.55rem!important}}
 p,li,label,[data-testid="stCaptionContainer"]{{color:#4A3A33}}
 /* barra do topo */
@@ -64,6 +65,8 @@ p,li,label,[data-testid="stCaptionContainer"]{{color:#4A3A33}}
 .st-key-topo [data-baseweb="select"] *{{color:#FFF4E2!important;fill:#FFF4E2!important;font-weight:800}}
 .st-key-topo button{{background:rgba(255,255,255,.12)!important;color:#FFF4E2!important;border:1px solid rgba(242,196,107,.55)!important}}
 .marca{{display:flex;align-items:center;gap:14px}}
+.loja-fixa{{color:#FFF4E2;font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:700;text-align:right;line-height:1.05}}
+.loja-fixa span{{display:block;font-family:'Nunito Sans',sans-serif;font-size:.68rem;letter-spacing:.2em;color:{OURO_C};font-weight:900}}
 .marca img{{width:56px;height:56px;border-radius:50%;border:2px solid {OURO};box-shadow:0 0 0 4px rgba(242,196,107,.15)}}
 .marca .t1{{font-family:'Cormorant Garamond',serif;font-size:1.75rem;font-weight:700;line-height:1;color:#FFF4E2}}
 .marca .t2{{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:{OURO_C};font-weight:900;margin-bottom:3px}}
@@ -138,6 +141,9 @@ input{{font-size:17px!important;font-weight:700!important;color:{TINTA}!importan
 /* busca grande */
 .st-key-busca input{{font-size:1.3rem!important;min-height:3.6rem}}
 .st-key-login [data-testid="stForm"]{{border:0!important;padding:0;background:transparent}}
+.st-key-login [data-testid="stButtonGroup"],.st-key-login [data-testid="stButtonGroup"]>div{{width:100%!important}}
+.st-key-login [data-testid="stButtonGroup"]>div{{flex-direction:column;gap:8px}}
+.st-key-login [data-testid="stButtonGroup"] button{{width:100%;min-height:3.6rem;justify-content:center}}
 .st-key-busca [data-testid="stForm"]{{border:0!important;padding:0;background:transparent}}
 /* atalhos de produto */
 .st-key-grade .stButton>button{{min-height:5.4rem;white-space:normal;text-align:left;justify-content:flex-start;line-height:1.25;padding:10px 14px;font-size:.92rem}}
@@ -160,6 +166,7 @@ hr{{border-color:{LINHA}!important}}
  .st-key-menu button *{{overflow:visible!important;text-overflow:clip!important;max-width:none!important}}
  .st-key-topo [data-testid="stHorizontalBlock"]{{gap:.7rem!important}}
  .marca{{margin-bottom:4px}}
+ .loja-fixa{{display:none}}
  .st-key-acoes .stButton>button{{min-height:4.4rem}}
  .st-key-acoes .stButton>button p{{font-size:1.05rem!important}}
  [class*="st-key-esc_"] .stButton>button p{{font-size:1.05rem!important}}
@@ -384,9 +391,32 @@ def produtos_ativos():
 
 
 # ---------------------------------------------------------------- login
+LOGIN_LOJA_PADRAO = {"aterrado": "Aterrado", "vila": "Vila Santa Cecília"}
+
+
 def usuarios():
     u = segredo("usuarios")
-    return {str(k).lower(): str(v) for k, v in dict(u).items()} if u else {"norma": "241618"}
+    if u:
+        return {str(k).lower(): str(v) for k, v in dict(u).items()}
+    return {"aterrado": "1234", "vila": "1234", "norma": "241618"}  # só para teste, sem Secrets
+
+
+def loja_do_login(u=None):
+    """Se o login é de uma loja, devolve o nome da loja; se é da dona, devolve None."""
+    u = (u or st.session_state.get("usuario", "")).lower()
+    nome = segredo("lojas", u) or LOGIN_LOJA_PADRAO.get(u)
+    if not nome:
+        for l in LOJAS:
+            if sem_acento(l).replace(" ", "") == sem_acento(u).replace(" ", ""):
+                nome = l
+    return nome if nome in LOJAS else None
+
+
+def nome_login(u):
+    l = loja_do_login(u)
+    if l:
+        return f"Loja {l}"
+    return f"{u.capitalize()} (dona)" if papel(u) == "dona" else u.capitalize()
 
 
 def papel(u=None):
@@ -394,7 +424,9 @@ def papel(u=None):
     p = segredo("papeis", u)
     if p:
         return str(p).lower()
-    return "dona" if u == "norma" else "vendedora"
+    if u == "norma":
+        return "dona"
+    return "loja" if loja_do_login(u) else "vendedora"
 
 
 def eh_dona():
@@ -431,16 +463,16 @@ def tela_login():
                border:3px solid {OURO};box-shadow:0 12px 30px rgba(74,14,24,.25)">
           <div style="font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;color:{OURO};font-weight:900;margin-top:14px">Caixa</div>
           <div style="font-family:'Cormorant Garamond',serif;font-size:2.4rem;font-weight:700;color:{VINHO_E};line-height:1">Jardim do Éden</div>
-          <div style="color:#8A7A65;margin:6px 0 10px">Toque no seu nome e digite a senha</div></div>""",
+          <div style="color:#8A7A65;margin:6px 0 10px">Toque na sua loja e digite a senha</div></div>""",
                     unsafe_allow_html=True)
-        nomes = list(usuarios())
+        nomes = sorted(usuarios(), key=lambda n: (loja_do_login(n) is None, LOJAS.index(loja_do_login(n)) if loja_do_login(n) else 0, n))
         with st.form("login", border=False):
-            u = st.pills("Quem está entrando?", nomes, default=nomes[0] if len(nomes) == 1 else None,
-                         format_func=lambda n: n.capitalize(), key="login_user")
+            u = st.pills("Qual loja?", nomes, default=nomes[0] if len(nomes) == 1 else None,
+                         format_func=nome_login, key="login_user")
             s = st.text_input("Senha", type="password", placeholder="••••••")
             ok = st.form_submit_button("Entrar", type="primary", width="stretch", icon=":material/login:")
         if ok and not u:
-            st.error("Toque no seu nome.")
+            st.error("Toque na sua loja.")
             return
         u = (u or "").lower()
         if ok:
@@ -903,9 +935,13 @@ def vendas_periodo(nome, loja):
 # ---------------------------------------------------------------- VENDAS FEITAS
 def tela_vendas(loja_atual):
     st.markdown("#### Vendas feitas")
-    c1, c2 = st.columns(2)
-    per = c1.selectbox("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"])
-    loja = c2.selectbox("Loja", ["Todas", *LOJAS], index=1 + LOJAS.index(loja_atual))
+    if eh_dona():
+        c1, c2 = st.columns(2)
+        per = c1.selectbox("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"])
+        loja = c2.selectbox("Loja", ["Todas", *LOJAS], index=1 + LOJAS.index(loja_atual))
+    else:
+        per = st.selectbox("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"])
+        loja = loja_atual
     v, _, _ = vendas_periodo(per, loja)
     v = v.sort_values("dt", ascending=False)
     ok = v[v["status"] != "cancelada"]
@@ -951,10 +987,16 @@ def excel(vendas, itens):
 
 
 def tela_painel(loja_atual):
-    st.markdown("#### Painel")
-    c1, c2 = st.columns(2)
-    per = c1.segmented_control("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"], default="7 dias") or "7 dias"
-    loja = c2.segmented_control("Loja", ["Todas", *LOJAS], default="Todas") or "Todas"
+    dona = eh_dona()
+    if dona:
+        st.markdown("#### Painel")
+        loja = st.segmented_control("Ver", ["Todas", *LOJAS], default="Todas", key="painel_loja",
+                                    format_func=lambda l: "Tudo junto" if l == "Todas" else l) or "Todas"
+    else:
+        loja = loja_atual
+        st.markdown(f"#### Indicadores · {loja}")
+    per = st.segmented_control("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"],
+                               default="7 dias", key="painel_per") or "7 dias"
     v, a, b = vendas_periodo(per, loja)
     v = v[v["status"] != "cancelada"]
     it = carregar("Itens")
@@ -972,17 +1014,44 @@ def tela_painel(loja_atual):
     com_custo = it[it["produto_id"].map(custos).fillna(0) > 0]
     lucro = (com_custo["total"] - com_custo["qtd"] * com_custo["produto_id"].map(custos)).sum()
     desc_rateio = v["desconto"].sum()
-    m1, m2, m3, m4, m5 = st.container(key="kpis").columns(5)
-    m1.metric("Total vendido", brl(tot), delta)
-    m2.metric("Vendas", n)
-    m3.metric("Venda média", brl(tot / n if n else 0))
-    m4.metric("Peças vendidas", int(it["qtd"].sum()))
-    m5.metric("Lucro bruto estimado", brl(lucro - desc_rateio),
-              help="Preço de venda menos o custo atual do produto, já tirando os descontos. "
-                   "Produtos sem custo (lingerie e prótese por faixa) ficam de fora.")
+    k = st.container(key="kpis")
+    cols = k.columns(3) + k.columns(2 if dona else 1)
+    cols[0].metric("Total vendido", brl(tot), delta)
+    cols[1].metric("Vendas", n)
+    cols[2].metric("Venda média", brl(tot / n if n else 0))
+    cols[3].metric("Peças vendidas", int(it["qtd"].sum()))
+    if dona:  # o lucro mostra a margem: só a dona vê
+        cols[4].metric("Lucro bruto estimado", brl(lucro - desc_rateio),
+                       help="Preço de venda menos o custo atual do produto, já tirando os descontos. "
+                            "Produtos sem custo (lingerie e prótese por faixa) ficam de fora.")
     if v.empty:
         st.info("Nenhuma venda nesse período.")
         return
+
+    if dona and loja == "Todas":
+        st.markdown("**Comparativo das lojas**")
+        linhas = []
+        for l in LOJAS:
+            vl = v[v["loja"] == l]
+            il = it[it["venda_id"].isin(vl["id"])]
+            cl = il[il["produto_id"].map(custos).fillna(0) > 0]
+            luc = (cl["total"] - cl["qtd"] * cl["produto_id"].map(custos)).sum() - vl["desconto"].sum()
+            linha = {"Loja": l, "Total": vl["total"].sum(), "Vendas": len(vl),
+                     "Venda média": vl["total"].sum() / len(vl) if len(vl) else 0, "Peças": int(il["qtd"].sum()),
+                     "Lucro estimado": luc, "Parte do total": vl["total"].sum() / tot if tot else 0}
+            for k, nome in NOME_FORMA.items():
+                linha[nome] = vl.loc[vl["forma"] == k, "total"].sum()
+            linhas.append(linha)
+        comp = pd.DataFrame(linhas)
+        dinheiro = {c: st.column_config.NumberColumn(c, format="R$ %.2f") for c in
+                    ["Total", "Venda média", "Lucro estimado", *NOME_FORMA.values()]}
+        st.dataframe(comp, hide_index=True, width="stretch",
+                     column_config={**dinheiro, "Parte do total": st.column_config.ProgressColumn(
+                         "Parte do total", format="percent", min_value=0, max_value=1)})
+        st.markdown("**Por dia, loja a loja**")
+        por_dia = v.pivot_table(index=v["dt"].dt.date, columns="loja", values="total", aggfunc="sum", fill_value=0)
+        por_dia.index = pd.to_datetime(por_dia.index)
+        st.bar_chart(por_dia, color=["#7A1726", "#E0A21B"][:len(por_dia.columns)], stack=False, y_label="R$", x_label="")
 
     g1, g2 = st.columns(2)
     with g1:
@@ -990,14 +1059,10 @@ def tela_painel(loja_atual):
         f = v.groupby("forma")["total"].sum().rename(index=NOME_FORMA).sort_values(ascending=False)
         st.bar_chart(f, horizontal=True, color="#E0A21B", y_label="", x_label="R$")
     with g2:
-        st.markdown("**Por loja**")
-        lj = v.groupby("loja")["total"].sum().sort_values(ascending=False)
-        st.bar_chart(lj, horizontal=True, color="#7A1726", y_label="", x_label="R$")
-
-    st.markdown("**Por dia**")
-    dia = v.groupby(v["dt"].dt.date)["total"].sum()
-    dia.index = pd.to_datetime(dia.index)
-    st.bar_chart(dia, color="#E0A21B", y_label="R$", x_label="")
+        st.markdown("**Por dia**")
+        dia = v.groupby(v["dt"].dt.date)["total"].sum()
+        dia.index = pd.to_datetime(dia.index)
+        st.bar_chart(dia, color="#7A1726", y_label="R$", x_label="")
 
     g3, g4 = st.columns(2)
     with g3:
@@ -1166,7 +1231,8 @@ def tela_hoje(loja):
     h = agora()
     saud = "Bom dia" if h.hour < 12 else "Boa tarde" if h.hour < 18 else "Boa noite"
     dias = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
-    st.markdown(f"<div class='saud'>{saud}, {st.session_state.usuario.capitalize()}!</div>"
+    quem = "" if loja_do_login() else f", {st.session_state.usuario.capitalize()}"
+    st.markdown(f"<div class='saud'>{saud}{quem}!</div>"
                 f"<div class='data'>{loja} · {dias[h.weekday()]}, {h:%d/%m/%Y}</div>", unsafe_allow_html=True)
     if st.session_state.pop("fechou", False):
         e = caixa_estado(loja)
@@ -1256,14 +1322,19 @@ def main():
     topo = st.container(key="topo")
     topo1, topo2, topo3 = topo.columns([3, 2, 1.1], vertical_alignment="center")
     topo1.markdown(f"<div class='marca'><img src='data:image/png;base64,{LOGO64}'><div>"
-                   f"<div class='t2'>Caixa · {'Dona' if eh_dona() else 'Vendedora'}</div><div class='t1'>Jardim do Éden</div></div></div>",
+                   f"<div class='t2'>{'Caixa · Dona' if eh_dona() else 'Loja ' + (loja_do_login() or '')}</div><div class='t1'>Jardim do Éden</div></div></div>",
                    unsafe_allow_html=True)
-    if "loja" not in st.session_state:
-        q = st.query_params.get("loja", "")
-        st.session_state.loja = LOJAS[int(q)] if q.isdigit() and int(q) < len(LOJAS) else LOJAS[0]
-    loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
-    st.query_params["loja"] = str(LOJAS.index(loja))
-    with topo3.popover(st.session_state.usuario.capitalize(), width="stretch", icon=":material/person:"):
+    fixa = loja_do_login()
+    if fixa:
+        loja = fixa
+        topo2.markdown(f"<div class='loja-fixa'><span>LOJA</span>{fixa}</div>", unsafe_allow_html=True)
+    else:
+        if "loja" not in st.session_state:
+            q = st.query_params.get("loja", "")
+            st.session_state.loja = LOJAS[int(q)] if q.isdigit() and int(q) < len(LOJAS) else LOJAS[0]
+        loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
+        st.query_params["loja"] = str(LOJAS.index(loja))
+    with topo3.popover("Dona" if eh_dona() else "Conta", width="stretch", icon=":material/person:"):
         if st.button("Atualizar dados", width="stretch", icon=":material/refresh:"):
             gravou()
             st.rerun()
@@ -1286,11 +1357,11 @@ def main():
     with st.container(key="menu"):
         tela = st.segmented_control("Menu", menu, key="tela", label_visibility="collapsed", width="stretch") or M_HOJE
     if tela == M_MAIS:
-        sub_menu = [M_VENDAS] + ([M_PROD, M_PAINEL] if eh_dona() else [])
+        sub_menu = [M_PAINEL, M_VENDAS] + ([M_PROD] if eh_dona() else [])
         if st.session_state.get("sub") not in sub_menu:
-            st.session_state.sub = M_VENDAS
+            st.session_state.sub = M_PAINEL
         with st.container(key="submenu"):
-            tela = st.segmented_control("Mais", sub_menu, key="sub", label_visibility="collapsed", width="stretch") or M_VENDAS
+            tela = st.segmented_control("Mais", sub_menu, key="sub", label_visibility="collapsed", width="stretch") or M_PAINEL
     if tela == M_HOJE:
         tela_hoje(loja)
     elif tela == M_CAIXA:
@@ -1303,7 +1374,7 @@ def main():
         tela_produtos()
     elif tela == M_VENDAS:
         tela_vendas(loja)
-    elif tela == M_PAINEL and eh_dona():
+    elif tela == M_PAINEL:
         tela_painel(loja)
 
 
