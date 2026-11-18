@@ -86,7 +86,8 @@ def preco_regra(custo):
 
 
 def num(serie):
-    return pd.to_numeric(serie.astype(str).str.replace(",", ".", regex=False), errors="coerce").fillna(0)
+    """Texto da planilha → número (sempre float, mesmo com a coluna vazia)."""
+    return pd.to_numeric(serie.astype(str).str.replace(",", ".", regex=False), errors="coerce").fillna(0).astype("float64")
 
 
 def novo_id(prefixo=""):
@@ -927,8 +928,12 @@ def tela_painel(loja_atual):
     tot, n = v["total"].sum(), len(v)
     delta = None if per == "Tudo" or ant.empty else f"{(tot - ant['total'].sum()) / max(ant['total'].sum(), 0.01) * 100:+.0f}% vs. período anterior"
     custos = carregar("Produtos").set_index("id")["custo"]
-    com_custo = it[it["produto_id"].map(custos).fillna(0) > 0]
-    lucro = (com_custo["total"] - com_custo["qtd"] * com_custo["produto_id"].map(custos)).sum()
+
+    def custo_de(ids):  # sempre número, mesmo sem nenhuma venda (coluna vazia)
+        return pd.to_numeric(ids.map(custos), errors="coerce").fillna(0).astype("float64")
+
+    com_custo = it[custo_de(it["produto_id"]) > 0]
+    lucro = (com_custo["total"] - com_custo["qtd"] * custo_de(com_custo["produto_id"])).sum()
     desc_rateio = v["desconto"].sum()
     k = st.container(key="kpis")
     cols = k.columns(3) + k.columns(2 if dona else 1)
@@ -950,8 +955,8 @@ def tela_painel(loja_atual):
         for l in LOJAS:
             vl = v[v["loja"] == l]
             il = it[it["venda_id"].isin(vl["id"])]
-            cl = il[il["produto_id"].map(custos).fillna(0) > 0]
-            luc = (cl["total"] - cl["qtd"] * cl["produto_id"].map(custos)).sum() - vl["desconto"].sum()
+            cl = il[custo_de(il["produto_id"]) > 0]
+            luc = (cl["total"] - cl["qtd"] * custo_de(cl["produto_id"])).sum() - vl["desconto"].sum()
             linha = {"Loja": l, "Total": vl["total"].sum(), "Vendas": len(vl),
                      "Venda média": vl["total"].sum() / len(vl) if len(vl) else 0, "Peças": int(il["qtd"].sum()),
                      "Lucro estimado": luc, "Parte do total": vl["total"].sum() / tot if tot else 0}
