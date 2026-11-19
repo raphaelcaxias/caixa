@@ -54,6 +54,10 @@ M_EST, M_VENDAS = ":material/inventory_2: Estoque", ":material/receipt_long: Ven
 M_PROD, M_PAINEL = ":material/sell: Produtos", ":material/monitoring: Painel"
 M_MAIS = ":material/more_horiz: Mais"
 M_HOJE = ":material/home: Início"
+# Ponte pelo Apps Script da própria planilha (sem Secrets). O link é colado aqui depois de "Implantar".
+# A senha é a mesma escrita no texto da ponte (ponte-apps-script.gs). Repositório do GitHub: deixe PRIVADO.
+PONTE_URL = "https://script.google.com/macros/s/AKfycbxuhOWd4HEnyNQq5lKKje_zltS7_w2rtJ8jP86I9btosdjnC5ioGpkTacHS2hV6bm-C/exec"
+PONTE_SENHA = "MVaKj1M0Ei8-itI0taqBYfKOD5ZVfY4Z"
 HORAS_LOGIN = 14  # o login vale por um dia de trabalho, mesmo recarregando a página
 
 with open(os.path.join(PASTA, "logo.png"), "rb") as _f:
@@ -222,6 +226,66 @@ def tentar(fn, *a, tentativas=3, **k):
             time.sleep(1.5 * (i + 1))
 
 
+def tabela(vals, cols):
+    """Linhas cruas da planilha (1ª linha = cabeçalho) -> tabela com as colunas do app, tudo como texto."""
+    if not vals:
+        return pd.DataFrame(columns=cols)
+    cab = [str(c).strip() for c in vals[0]]
+    linhas = [list(r) + [""] * (len(cab) - len(r)) for r in vals[1:] if any(str(x).strip() for x in r)]
+    df = pd.DataFrame([r[:len(cab)] for r in linhas], columns=cab).astype(str)
+    for c in cols:
+        if c not in df:
+            df[c] = ""
+    return df[cols]
+
+
+def valor_celula(c, v):
+    if c in NUMEROS:
+        try:
+            return float(str(v).replace(",", "."))
+        except ValueError:
+            return 0
+    return "" if v is None else str(v)
+
+
+@_protege_gravacao
+class BancoPonte:
+    """Planilha do Google pela ponte (Apps Script da própria planilha): sem chave .json e sem Secrets."""
+    na_planilha = True
+
+    def __init__(self, url, senha):
+        import requests
+        self.url, self.senha, self.s = url, senha, requests.Session()
+
+    def _pedir(self, acao, aba, **dados):
+        def uma_vez():
+            r = self.s.post(self.url, json={"senha": self.senha, "acao": acao, "aba": aba, **dados}, timeout=40)
+            r.raise_for_status()  # 429/5xx -> tentar de novo
+            try:
+                resp = r.json()
+            except ValueError:
+                raise RuntimeError("a ponte respondeu uma página em vez de dados. Na implantação, "
+                                   "'Quem pode acessar' tem que ser 'Qualquer pessoa'.") from None
+            if not resp.get("ok"):
+                raise RuntimeError(f"a ponte recusou: {resp.get('erro')}")
+            return resp.get("dados")
+        return tentar(uma_vez)
+
+    def ler(self, aba):
+        return tabela(self._pedir("ler", aba), ABAS[aba])
+
+    def anexar(self, aba, linhas):
+        cols = ABAS[aba]
+        self._pedir("anexar", aba, linhas=[[valor_celula(c, l.get(c, "")) for c in cols] for l in linhas])
+
+    def regravar(self, aba, df):
+        cols = ABAS[aba]
+        self._pedir("regravar", aba, linhas=[[valor_celula(c, v) for c, v in zip(cols, r)] for r in df[cols].values.tolist()])
+
+    def mudar(self, aba, chave_col, chave, col, valor):
+        self._pedir("mudar", aba, chave_col=chave_col, chave=chave, col=col, valor=valor_celula(col, valor))
+
+
 @_protege_gravacao
 class BancoSheets:
     """Planilha do Google: as duas lojas gravam no mesmo lugar."""
@@ -250,14 +314,7 @@ class BancoSheets:
         vals = tentar(w.get, value_render_option="UNFORMATTED_VALUE")
         if not vals:
             tentar(w.append_row, cols, value_input_option="RAW")
-            return pd.DataFrame(columns=cols)
-        cab = [str(c).strip() for c in vals[0]]
-        linhas = [list(r) + [""] * (len(cab) - len(r)) for r in vals[1:] if any(str(x).strip() for x in r)]
-        df = pd.DataFrame([r[:len(cab)] for r in linhas], columns=cab).astype(str)
-        for c in cols:
-            if c not in df:
-                df[c] = ""
-        return df[cols]
+        return tabela(vals, cols)
 
     @staticmethod
     def _valor(c, v):
@@ -355,7 +412,22 @@ def na_planilha():
     return getattr(banco(), "na_planilha", False)
 
 
+def ponte():
+    """Link e senha da ponte: dos Secrets se existirem, senão os escritos no topo deste arquivo."""
+    padrao = "" if os.environ.get("CAIXA_SEM_PONTE") == "1" else PONTE_URL  # os testes rodam sem a planilha real
+    url = str(segredo("ponte", "url") or padrao).strip()
+    ok = url.startswith("https://script.google.com/") or url.startswith("http://127.0.0.1:")  # o 2º é só para os testes
+    return (url, str(segredo("ponte", "senha") or PONTE_SENHA)) if ok else None
+
+
+@st.cache_resource(show_spinner=False)
+def _ponte(url, senha):
+    return BancoPonte(url, senha)
+
+
 def banco():
+    if ponte():
+        return _ponte(*ponte())
     cred, planilha = credenciais(), segredo("planilha", "endereco")
     if cred and planilha:
         return _sheets(str(planilha), cred.get("client_email", ""))
@@ -1493,18 +1565,12 @@ def bloquear_sem_planilha():
     """Na nuvem, sem a planilha ligada, nada pode ser vendido: tudo se perderia quando o app dormir."""
     if not (NA_NUVEM and not na_planilha()):
         return
-    motivo = erro_nos_secrets() or _credenciais()[1]
-    falta = []
-    if not credenciais() and not _credenciais()[1]:
-        falta.append("a chave do Google (gcp_service_account ou gcp_json)")
-    if not segredo("planilha", "endereco"):
-        falta.append("o endereço da planilha ([planilha] endereco)")
+    motivo = erro_nos_secrets() or _credenciais()[1]  # só aparece se alguém tentou o caminho antigo (chave .json)
     st.error("### O caixa está DESLIGADO da planilha\n"
              "Para não perder nenhuma venda, o app está travado até a ligação com a planilha do Google voltar.\n\n"
-             + (f"**Problema nos Secrets:** {motivo}\n\n" if motivo else "")
-             + (f"**Falta nos Secrets:** {' e '.join(falta)}.\n\n" if falta else "")
-             + "**Como resolver:** Manage app → ⋮ → Settings → Secrets → conferir/colar de novo → Save → "
-               "depois Manage app → ⋮ → Reboot app.", icon=":material/cloud_off:")
+             "**Falta:** o link da ponte da planilha (Extensões → Apps Script → Implantar → App da Web). "
+             "Mande o link para quem cuida do app colocar no `app.py`."
+             + (f"\n\n**Problema nos Secrets:** {motivo}" if motivo else ""), icon=":material/cloud_off:")
     st.stop()
 
 
