@@ -2,6 +2,7 @@
 # Vendas, estoque e produtos guardados numa planilha do Google (ou em arquivos locais para teste).
 import base64
 import hashlib
+import json
 import hmac
 import inspect
 import io
@@ -305,12 +306,32 @@ def erro_nos_secrets():
         return str(e)
 
 
-def credenciais():
+def _credenciais():
+    """Devolve (chave do Google, problema). Nunca derruba o app por causa de um Secret mal colado."""
     cred = segredo("gcp_service_account")
-    if not cred and segredo("gcp_json"):
-        import json
-        cred = json.loads(str(segredo("gcp_json")))  # o arquivo .json do Google colado inteiro
-    return dict(cred) if cred else None
+    if cred:
+        return dict(cred), None
+    txt = segredo("gcp_json")
+    if not txt:
+        return None, None
+    txt = str(txt)
+    ini, fim = txt.find("{"), txt.rfind("}")  # aceita espaços ou texto sobrando antes/depois
+    if ini < 0 or fim < ini:
+        return None, ("o gcp_json está sem o conteúdo do arquivo .json (não achei a { do começo e a } do fim). "
+                      "Troque as palavras COLE_AQUI_O_JSON pelo conteúdo inteiro do arquivo.")
+    try:
+        cred = json.loads(txt[ini:fim + 1], strict=False)
+    except json.JSONDecodeError as e:  # a mensagem não mostra o conteúdo da chave
+        return None, (f"o gcp_json não é um .json válido (linha {e.lineno} do JSON colado: {e.msg}). "
+                      "Cole de novo o arquivo inteiro, da { até a }, sem mudar nada.")
+    falta = [c for c in ("client_email", "private_key") if not cred.get(c)]
+    if falta:
+        return None, f"o .json colado não tem {' nem '.join(falta)}: confira se é o arquivo da chave do Google."
+    return cred, None
+
+
+def credenciais():
+    return _credenciais()[0]
 
 
 @st.cache_resource(show_spinner=False)
@@ -1458,9 +1479,9 @@ def bloquear_sem_planilha():
     """Na nuvem, sem a planilha ligada, nada pode ser vendido: tudo se perderia quando o app dormir."""
     if not (NA_NUVEM and isinstance(banco(), BancoLocal)):
         return
-    motivo = erro_nos_secrets()
+    motivo = erro_nos_secrets() or _credenciais()[1]
     falta = []
-    if not credenciais():
+    if not credenciais() and not _credenciais()[1]:
         falta.append("a chave do Google (gcp_service_account ou gcp_json)")
     if not segredo("planilha", "endereco"):
         falta.append("o endereço da planilha ([planilha] endereco)")
