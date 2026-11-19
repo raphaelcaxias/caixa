@@ -34,10 +34,9 @@ LANCAMENTOS_INICIAIS = [
     {"id": "VANT-20261118-ATE", "data": "2026-11-18 22:00:00", "loja": "Aterrado", "total": 591.50},
     {"id": "VANT-20261118-VIL", "data": "2026-11-18 22:00:00", "loja": "Vila Santa Cecília", "total": 1062.00},
     # vendas de 19/11 feitas enquanto o caixa ainda não gravava na planilha
-    {"id": "VANT-20261119-ATE-1", "data": "2026-11-19 12:10:00", "loja": "Aterrado", "total": 49.99,
-     "forma": "pix", "vendedor": "Raphael"},
-    {"id": "VANT-20261119-ATE-2", "data": "2026-11-19 12:15:00", "loja": "Aterrado", "total": 74.99, "forma": "debito"},
-    {"id": "VANT-20261119-ATE-3", "data": "2026-11-19 12:20:00", "loja": "Aterrado", "total": 59.99, "forma": "pix"},
+    {"id": "VANT-20261119-ATE-1", "data": "2026-11-19 12:10:00", "loja": "Aterrado", "total": 50.00, "forma": "pix"},
+    {"id": "VANT-20261119-ATE-2", "data": "2026-11-19 12:15:00", "loja": "Aterrado", "total": 59.99, "forma": "debito"},
+    {"id": "VANT-20261119-ATE-3", "data": "2026-11-19 12:20:00", "loja": "Aterrado", "total": 74.99, "forma": "debito"},
 ]
 
 ABAS = {
@@ -468,11 +467,25 @@ def venda_so_total(vid, data, loja, total, forma="nao_informado", vendedor="Não
 
 
 def garantir_lancamentos_iniciais():
-    ja = set(carregar("Vendas")["id"])
-    novos = [venda_so_total(l["id"], l["data"], l["loja"], l["total"], l.get("forma", "nao_informado"),
-                            l.get("vendedor", "Não informado")) for l in LANCAMENTOS_INICIAIS if l["id"] not in ja]
+    """Lança o que falta e corrige valor/forma/vendedor de um lançamento que já entrou errado."""
+    v = carregar("Vendas").set_index("id")
+    novos, mudou = [], False
+    for l in LANCAMENTOS_INICIAIS:
+        certo = venda_so_total(l["id"], l["data"], l["loja"], l["total"], l.get("forma", "nao_informado"),
+                               l.get("vendedor", "Não informado"))
+        if l["id"] not in v.index:
+            novos.append(certo)
+            continue
+        atual = v.loc[l["id"]]
+        if isinstance(atual, pd.DataFrame):
+            atual = atual.iloc[0]
+        for col in ("total", "subtotal", "recebido", "forma", "vendedor", "loja", "data"):
+            if (abs(float(atual[col]) - float(certo[col])) > 0.001) if col in NUMEROS else (str(atual[col]) != str(certo[col])):
+                banco().mudar("Vendas", "id", l["id"], col, certo[col])
+                mudou = True
     if novos:
         banco().anexar("Vendas", novos)
+    if novos or mudou:
         gravou()
 
 
