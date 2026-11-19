@@ -433,32 +433,47 @@ def banco():
     return _local()
 
 
-def _ler(aba):
-    df = banco().ler(aba)
+MOVIMENTO = ("Vendas", "Itens", "Entradas", "Caixa")
+
+
+def _ler(b, aba):
+    df = b.ler(aba)
     for c in ABAS[aba]:
         if c in NUMEROS:
             df[c] = num(df[c])
+    if "id" in df and aba != "Itens":
+        df = df.drop_duplicates("id", keep="first")  # linha repetida na planilha conta uma vez só
     return df
 
 
-@st.cache_data(ttl=300, show_spinner="Carregando produtos…")
-def _ler_produtos(aba):
-    return _ler(aba)
+@st.cache_data(ttl=600, show_spinner="Carregando produtos…")
+def _ler_produtos():
+    return _ler(banco(), "Produtos")
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def _ler_movimento(aba):
-    return _ler(aba)
+@st.cache_data(ttl=120, show_spinner="Carregando…")
+def _ler_movimento():
+    """As 4 abas de movimento de uma vez, em paralelo: 1 espera em vez de 4."""
+    from concurrent.futures import ThreadPoolExecutor
+    b = banco()
+    with ThreadPoolExecutor(len(MOVIMENTO)) as ex:
+        tabelas = list(ex.map(lambda a: _ler(b, a), MOVIMENTO))
+    return dict(zip(MOVIMENTO, tabelas))
 
 
 def carregar(aba):
-    """Produtos mudam pouco (guardados 5 min); vendas, estoque e caixa são relidos a cada 30 s."""
-    return (_ler_produtos if aba == "Produtos" else _ler_movimento)(aba)
+    """Produtos ficam guardados 10 min; o movimento, 2 min (ou até alguém gravar algo neste app)."""
+    return _ler_produtos() if aba == "Produtos" else _ler_movimento()[aba]
 
 
-def gravou():
-    _ler_produtos.clear()
+def gravou(produtos=False):
     _ler_movimento.clear()
+    if produtos:
+        _ler_produtos.clear()
+
+
+def gravou_tudo():
+    gravou(produtos=True)
 
 
 def venda_so_total(vid, data, loja, total, forma="nao_informado", vendedor="Não informado", usuario="lançamento manual"):
@@ -489,11 +504,31 @@ def garantir_lancamentos_iniciais():
         gravou()
 
 
+@st.cache_resource(show_spinner=False)
+def _uma_vez():
+    """Trava e marcador do servidor: impede duas abas abertas ao mesmo tempo de lançarem em dobro."""
+    import threading
+    return {"trava": threading.Lock(), "feito": False}
+
+
+def preparar_planilha():
+    """Produtos iniciais + lançamentos manuais. Roda uma vez quando o app liga, não a cada clique."""
+    u = _uma_vez()
+    if u["feito"]:
+        return
+    with u["trava"]:
+        if not u["feito"]:
+            preparar_produtos()
+            gravou()  # relê da planilha na hora, sem cache, antes de conferir os lançamentos
+            garantir_lancamentos_iniciais()
+            u["feito"] = True
+
+
 def preparar_produtos():
     if len(carregar("Produtos")) == 0:
         base = pd.read_csv(os.path.join(PASTA, "produtos_iniciais.csv"), dtype=str, keep_default_na=False)
         banco().regravar("Produtos", base)
-        gravou()
+        gravou(produtos=True)
 
 
 # ---------------------------------------------------------------- estoque = entradas − vendas
@@ -955,7 +990,7 @@ def tela_produtos():
                             banco().anexar("Entradas", [{"id": novo_id("E"), "data": agora_txt(), "loja": loja_q,
                                                          "produto_id": pid, "produto": nome.strip().upper(), "qtd": qtd,
                                                          "obs": "cadastro", "usuario": st.session_state.usuario}])
-                        gravou()
+                        gravou(produtos=True)
                         st.success(f"{nome.strip().upper()} cadastrado por {brl(p_final)}.")
 
     filtro = st.text_input("Procurar produto", placeholder="nome ou código")
@@ -999,7 +1034,7 @@ def tela_produtos():
                 mudou += 1
         if mudou:
             banco().regravar("Produtos", base.reset_index())
-            gravou()
+            gravou(produtos=True)
             st.success(f"{mudou} produto(s) atualizado(s).")
         else:
             st.info("Nada mudou.")
@@ -1010,7 +1045,7 @@ def tela_produtos():
             com = p["custo"] > 0
             p.loc[com, "preco"] = p.loc[com, "custo"].apply(preco_regra)
             banco().regravar("Produtos", p)
-            gravou()
+            gravou(produtos=True)
             st.success(f"{int(com.sum())} preços recalculados.")
 
 
@@ -1600,8 +1635,7 @@ def main():
             tela_login()
             return
     try:
-        preparar_produtos()
-        garantir_lancamentos_iniciais()
+        preparar_planilha()
     except Exception as e:
         st.error(f"Não consegui abrir a planilha. Confira a internet e a configuração. ({e})")
         st.stop()
@@ -1629,7 +1663,7 @@ def main():
         else:
             st.warning("Sem planilha: modo de teste neste computador.", icon=":material/cloud_off:")
         if st.button("Atualizar dados", width="stretch", icon=":material/refresh:"):
-            gravou()
+            gravou_tudo()
             st.rerun()
         if st.button("Sair", width="stretch", icon=":material/logout:"):
             st.session_state.clear()
@@ -1666,7 +1700,7 @@ def main():
         else:
             st.error("Não consegui carregar esta tela agora. Confira a internet e toque em **Tentar de novo**. "
                      "Se algo foi digitado, confira se foi salvo antes de repetir.", icon=":material/error:")
-        st.button("Tentar de novo", type="primary", icon=":material/refresh:", on_click=gravou)
+        st.button("Tentar de novo", type="primary", icon=":material/refresh:", on_click=gravou_tudo)
         with st.expander("Detalhes técnicos (para o suporte)"):
             st.code(nao_salvou(e) or f"{type(e).__name__}: {e}")
 
