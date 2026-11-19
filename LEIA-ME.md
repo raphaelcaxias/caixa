@@ -3,17 +3,18 @@
 Sistema de caixa no navegador, com login. As vendas ficam gravadas numa **planilha do Google**, então as duas lojas usam a mesma planilha.
 
 ## O que tem no app
-- **Login:** usuário `norma`, senha `241618`. A senha fica nos *Secrets*, não no código.
+- **Login:** toque na loja (Aterrado ou Vila Santa Cecília) e digite a senha. A senha fica nos *Secrets* (ou como código embaralhado no app), nunca escrita às claras.
   O login **continua valendo por 14 horas mesmo se recarregar a página**. Para isso, o app guarda uma chave no endereço da página.
   Dica: entre uma vez em cada loja e salve a página nos favoritos. O favorito já abre na loja certa.
-- **Dona × vendedora:** a `norma` é a dona. Quem for vendedora não vê **Produtos** (onde fica o custo) nem o **Painel**, não cancela vendas e não acerta o estoque.
+- **Vendedor(a):** escolhido em cada venda (Raphael, Daiane, Norma, Outros). Os indicadores saem por loja e "Tudo junto".
 - **🏠 Hoje** (tela inicial): quanto vendeu hoje e a comparação com ontem, a situação do caixa, os botões rápidos, as vendas por forma de pagamento e por vendedor(a), e o que precisa repor.
 - **💰 Caixa:** abrir o caixa com o troco, registrar sangria (dinheiro que saiu) e reforço (dinheiro que entrou), e fechar contando a gaveta. O app diz se **sobrou ou faltou dinheiro** e monta o **resumo do dia para mandar no WhatsApp**.
 - **Vender:** procure pelo leitor de código de barras, pelo nome ou pelo valor. Por exemplo, digite `189` para ver os produtos de R$ 189,xx; se só houver um, ele já entra na venda. Na hora de fechar, é obrigatório escolher quem vendeu (Raphael, Daiane, Norma, Outros) e a forma de pagamento (Dinheiro com troco, Pix, Crédito, Débito). O desconto pode ser em R$ ou em %. Depois da venda, um botão manda o **comprovante pelo WhatsApp** para a cliente. O **custo não aparece** nessa tela.
 - **Estoque:** separado por loja. Tem "Chegou mercadoria" e "Contagem" para acertar o estoque.
 - **Produtos:** edite preço, custo e código direto na tabela. Tem o botão "Aplicar a regra" (custo × 5, final 9,99) e o cadastro de produto novo.
 - **Vendas:** lista das vendas feitas, com os itens de cada uma e a opção de cancelar.
-- **Painel** (só a dona): mostra os dados por período e por loja: total, **lucro bruto estimado**, forma de pagamento, loja, dia, vendedor(a), vendedor × pagamento, mais vendidos e horários. Também baixa as vendas em Excel.
+- **Painel:** período pronto ou **datas escolhidas**, filtro por loja e por vendedor(a), comparação com o período anterior, **Destaques** (melhor dia, horário mais forte, forma mais usada, quem mais vendeu, produto campeão), gráficos com valor exato ao tocar e download em Excel. Valores muito grandes aparecem abreviados (R$ 1,25 Mi) e o valor exato fica no (?) e nas tabelas.
+- **Proteções:** sem planilha ligada o app não abre na nuvem; se o Google oscilar ele tenta de novo sozinho; se mesmo assim não gravar, aparece em vermelho "Isto NÃO foi salvo".
 
 ## A planilha
 O app cria 5 abas na planilha:
@@ -58,7 +59,7 @@ O estoque é a soma das Entradas menos o que foi vendido, e é calculado sozinho
    - o endereço da planilha;
    - os campos do arquivo `.json`, um por um. No `private_key`, copie o valor inteiro, com os `\n`.
 4. Clique em **Deploy**. Em 1 a 2 minutos o app está no ar.
-5. Entre com `norma` / `241618`, faça uma venda de teste e confira se ela apareceu nas abas **Vendas** e **Itens** da planilha.
+5. Entre numa loja com a senha, faça uma venda de teste e confira se ela apareceu nas abas **Vendas** e **Itens** da planilha.
 
 ### 5. Usar nas lojas
 - Abra o endereço do app no computador ou celular de cada loja e escolha a loja no topo da tela.

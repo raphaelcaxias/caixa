@@ -137,6 +137,14 @@ hr{border-color:var(--linha)!important}
  .st-key-grade [data-testid="stHorizontalBlock"]{flex-wrap:nowrap!important;gap:.4rem}
  .st-key-grade [data-testid="stColumn"]{flex:1 1 0!important;min-width:0!important;width:auto!important}
  .st-key-grade .stButton>button{min-height:5rem;font-size:.78rem;padding:8px}
- [data-testid="stMetricValue"]{font-size:1.4rem!important}
+ [data-testid="stMetricValue"]{font-size:1.2rem!important}
+ [data-testid="stMetricValue"] *,[data-testid="stMetricLabel"] *{white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
  .total-grande{font-size:2.1rem}
 }
+
+/* Destaques do painel */
+.destaques{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem;margin:.4rem 0 1.2rem}
+.dest{background:#fff;border:1px solid var(--linha);border-left:5px solid var(--ouro);border-radius:14px;padding:.65rem .9rem}
+.dest span{display:block;font-size:.85rem;color:#7a6a58;text-transform:uppercase;letter-spacing:.04em}
+.dest b{display:block;font-size:1.12rem;color:var(--vinho-escuro);line-height:1.3;overflow-wrap:anywhere}
+[data-testid="stVegaLiteChart"]{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:.5rem .3rem;overflow:hidden}

@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -24,7 +25,14 @@ TZ = ZoneInfo("America/Sao_Paulo")
 LOJAS = ["Aterrado", "Vila Santa Cecília"]
 VENDEDORES = ["Raphael", "Daiane", "Norma", "Outros"]
 FORMAS = {"Dinheiro": "dinheiro", "Pix": "pix", "Crédito": "credito", "Débito": "debito"}
-NOME_FORMA = {v: k for k, v in FORMAS.items()}
+NOME_FORMA = {v: k for k, v in FORMAS.items()} | {"nao_informado": "Não informado"}
+
+# Vendas de antes do app estar ligado à planilha (só o total do dia). Entram uma única vez:
+# se já existirem na planilha (mesmo canceladas), não são lançadas de novo.
+LANCAMENTOS_INICIAIS = [
+    {"id": "VANT-20261118-ATE", "data": "2026-11-18 22:00:00", "loja": "Aterrado", "total": 591.50},
+    {"id": "VANT-20261118-VIL", "data": "2026-11-18 22:00:00", "loja": "Vila Santa Cecília", "total": 1062.00},
+]
 
 ABAS = {
     "Produtos": ["id", "nome", "codigo", "custo", "preco", "ativo"],
@@ -69,6 +77,47 @@ def brl(v):
     return "R$ " + s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _br(n, casas=2):
+    return f"{n:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def brl_curto(v):
+    """R$ 1,25 Mi / R$ 3,40 Bi / R$ 845,53 Tri para não quebrar o cartão; abaixo de 1 milhão, valor cheio."""
+    v = float(v)
+    for limite, sufixo in ((1e12, "Tri"), (1e9, "Bi"), (1e6, "Mi")):
+        if abs(v) >= limite:
+            return f"R$ {_br(v / limite)} {sufixo}"
+    return brl(v)
+
+
+def num_curto(n):
+    n = float(n)
+    for limite, sufixo in ((1e12, "Tri"), (1e9, "Bi"), (1e6, "Mi")):
+        if abs(n) >= limite:
+            return f"{_br(n / limite)} {sufixo}"
+    return _br(n, 0)
+
+
+def reais(df, *cols):
+    """Tabela com dinheiro no jeito brasileiro (R$ 1.234,56) e que continua ordenando pelo número."""
+    numeros = list(df.select_dtypes("number").columns)
+    cols = [c for c in (cols or numeros) if c in df.columns]
+    outros = [c for c in numeros if c not in cols and c != "Parte do total"]  # a barra de % cuida da dela
+    est = df.style.format(brl, subset=cols)
+    if outros:  # quantidades: 7 e não 7.000000
+        est = est.format(lambda x: _br(x, 0) if float(x).is_integer() else _br(x), subset=outros)
+    return est
+
+
+def metrica(col, rotulo, valor, delta=None, ajuda=None, dinheiro=True, **kw):
+    """Cartão de número: mostra o valor abreviado e o exato no (?) quando abreviar."""
+    curto = brl_curto(valor) if dinheiro else num_curto(valor)
+    exato = brl(valor) if dinheiro else _br(float(valor), 0)
+    if curto != exato:
+        ajuda = (ajuda + "\n\n" if ajuda else "") + f"Valor exato: {exato}"
+    col.metric(rotulo, curto, delta, help=ajuda, **kw)
+
+
 def sem_acento(t):
     return "".join(c for c in unicodedata.normalize("NFD", str(t)) if unicodedata.category(c) != "Mn").upper()
 
@@ -95,6 +144,28 @@ def novo_id(prefixo=""):
 
 
 # ---------------------------------------------------------------- onde os dados ficam
+def nao_salvou(e):
+    """Marca de erro de gravação. É um atributo e não uma classe nova, porque o banco fica guardado em cache
+    entre as execuções do app e a classe seria outra a cada execução (o except não pegaria)."""
+    return getattr(e, "nao_salvou", False)
+
+
+def _protege_gravacao(cls):
+    for nome in ("anexar", "regravar", "mudar"):
+        original = getattr(cls, nome)
+
+        def envolta(self, aba, *a, _f=original, **k):
+            try:
+                return _f(self, aba, *a, **k)
+            except Exception as e:
+                if not nao_salvou(e):
+                    e.nao_salvou = f"aba {aba}: {type(e).__name__}: {e}"
+                raise
+        setattr(cls, nome, envolta)
+    return cls
+
+
+@_protege_gravacao
 class BancoLocal:
     """Arquivos CSV numa pasta. Bom para testar no computador."""
 
@@ -128,6 +199,24 @@ class BancoLocal:
         self.regravar(aba, df)
 
 
+def _erro_temporario(e):
+    """Falhas que costumam passar sozinhas: limite de uso do Google, servidor ocupado, internet oscilando."""
+    codigo = getattr(getattr(e, "response", None), "status_code", None)
+    return codigo in (408, 429, 500, 502, 503, 504) or isinstance(e, (ConnectionError, TimeoutError)) \
+        or any(p in type(e).__name__ for p in ("Connection", "Timeout"))
+
+
+def tentar(fn, *a, tentativas=3, **k):
+    for i in range(tentativas):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == tentativas - 1 or not _erro_temporario(e):
+                raise
+            time.sleep(1.5 * (i + 1))
+
+
+@_protege_gravacao
 class BancoSheets:
     """Planilha do Google: as duas lojas gravam no mesmo lugar."""
 
@@ -135,25 +224,25 @@ class BancoSheets:
         import gspread
         self.gspread = gspread
         gc = gspread.service_account_from_dict(dict(credenciais))
-        self.sh = gc.open_by_url(planilha) if planilha.startswith("http") else gc.open_by_key(planilha)
+        self.sh = tentar(gc.open_by_url, planilha) if planilha.startswith("http") else tentar(gc.open_by_key, planilha)
         self._ws = {}
 
     def ws(self, aba):
         if aba not in self._ws:
             try:
-                w = self.sh.worksheet(aba)
+                w = tentar(self.sh.worksheet, aba)
             except self.gspread.WorksheetNotFound:
-                w = self.sh.add_worksheet(title=aba, rows=1000, cols=len(ABAS[aba]))
-                w.append_row(ABAS[aba], value_input_option="RAW")
+                w = tentar(self.sh.add_worksheet, title=aba, rows=1000, cols=len(ABAS[aba]))
+                tentar(w.append_row, ABAS[aba], value_input_option="RAW")
             self._ws[aba] = w
         return self._ws[aba]
 
     def ler(self, aba):
         cols = ABAS[aba]
         w = self.ws(aba)
-        vals = w.get(value_render_option="UNFORMATTED_VALUE")
+        vals = tentar(w.get, value_render_option="UNFORMATTED_VALUE")
         if not vals:
-            w.append_row(cols, value_input_option="RAW")
+            tentar(w.append_row, cols, value_input_option="RAW")
             return pd.DataFrame(columns=cols)
         cab = [str(c).strip() for c in vals[0]]
         linhas = [list(r) + [""] * (len(cab) - len(r)) for r in vals[1:] if any(str(x).strip() for x in r)]
@@ -174,20 +263,20 @@ class BancoSheets:
 
     def anexar(self, aba, linhas):
         cols = ABAS[aba]
-        self.ws(aba).append_rows([[self._valor(c, l.get(c, "")) for c in cols] for l in linhas],
-                                 value_input_option="RAW", insert_data_option="INSERT_ROWS", table_range="A1")
+        tentar(self.ws(aba).append_rows, [[self._valor(c, l.get(c, "")) for c in cols] for l in linhas],
+               value_input_option="RAW", insert_data_option="INSERT_ROWS", table_range="A1")
 
     def regravar(self, aba, df):
         cols = ABAS[aba]
         valores = [cols] + [[self._valor(c, v) for c, v in zip(cols, r)] for r in df[cols].values.tolist()]
-        self.ws(aba).update(values=valores, range_name="A1", value_input_option="RAW")
+        tentar(self.ws(aba).update, values=valores, range_name="A1", value_input_option="RAW")
 
     def mudar(self, aba, chave_col, chave, col, valor):
         cols = ABAS[aba]
         w = self.ws(aba)
-        coluna = w.col_values(cols.index(chave_col) + 1)
+        coluna = tentar(w.col_values, cols.index(chave_col) + 1)
         if chave in coluna:
-            w.update_cell(coluna.index(chave) + 1, cols.index(col) + 1, valor)
+            tentar(w.update_cell, coluna.index(chave) + 1, cols.index(col) + 1, valor)
 
 
 def segredo(*chaves):
@@ -198,6 +287,22 @@ def segredo(*chaves):
         return v
     except Exception:
         return None
+
+
+# No Streamlit Cloud o app fica em /mount/src. Lá, arquivos locais SOMEM quando o app dorme:
+# por isso, na nuvem, o caixa só funciona ligado à planilha do Google.
+NA_NUVEM = PASTA.startswith("/mount/src") or os.environ.get("CAIXA_NUVEM") == "1"
+
+
+def erro_nos_secrets():
+    """Devolve o erro de leitura dos Secrets (ex.: texto colado com defeito) ou None se estiver tudo legível."""
+    try:
+        st.secrets.to_dict()
+        return None
+    except FileNotFoundError:
+        return "não há nenhum Secret salvo"
+    except Exception as e:  # erro de digitação no TOML, aspas faltando etc.
+        return str(e)
 
 
 def credenciais():
@@ -253,6 +358,19 @@ def gravou():
     _ler_movimento.clear()
 
 
+def venda_so_total(vid, data, loja, total, forma="nao_informado", vendedor="Não informado", usuario="lançamento manual"):
+    return {"id": vid, "data": data, "loja": loja, "vendedor": vendedor, "forma": forma, "subtotal": total,
+            "desconto": 0, "total": total, "recebido": total, "troco": 0, "usuario": usuario, "status": "ok"}
+
+
+def garantir_lancamentos_iniciais():
+    ja = set(carregar("Vendas")["id"])
+    novos = [venda_so_total(l["id"], l["data"], l["loja"], l["total"]) for l in LANCAMENTOS_INICIAIS if l["id"] not in ja]
+    if novos:
+        banco().anexar("Vendas", novos)
+        gravou()
+
+
 def preparar_produtos():
     if len(carregar("Produtos")) == 0:
         base = pd.read_csv(os.path.join(PASTA, "produtos_iniciais.csv"), dtype=str, keep_default_na=False)
@@ -305,7 +423,7 @@ def senha_confere(digitada, guardada):
 
 
 def usuarios():
-    """Só as lojas entram. Senha de cada loja: a dos Secrets ou, se não tiver, a mesma da norma (241618)."""
+    """Só as lojas entram. Senha de cada loja: a dos Secrets ou, se não tiver, a senha padrão (guardada só como código embaralhado)."""
     u = {str(k).lower(): str(v) for k, v in dict(segredo("usuarios") or {}).items()}
     padrao = u.get("norma") or SENHA_PADRAO
     for login in list(dict(segredo("lojas") or {})) + list(LOGIN_LOJA_PADRAO):
@@ -456,6 +574,7 @@ def tela_vender(loja):
             <div class='ok-t'>Venda feita!</div>
             <div class='ok-s'>{brl(u['total'])} · {NOME_FORMA[u['forma']]} · {u['vendedor']}</div>
             {f"<div class='ok-troco'>Troco: {brl(u['troco'])}</div>" if u['forma'] == 'dinheiro' and float(u['troco']) > 0 else ""}
+            {"<div class='ok-s' style='font-size:.95rem;opacity:.85'>✓ Guardada na planilha</div>" if isinstance(banco(), BancoSheets) else ""}
             </div></div>""", unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         if c1.button("Nova venda", type="primary", width="stretch", icon=":material/add_shopping_cart:"):
@@ -822,8 +941,8 @@ def tela_estoque(loja):
         tab = tab[(tab["estoque"] > 0) & (tab["estoque"] <= 2)]
     elif so == "Sem estoque":
         tab = tab[tab["estoque"] <= 0]
-    st.dataframe(tab[["nome", "preco", "estoque"]], hide_index=True, width="stretch", height=420,
-                 column_config={"nome": "Produto", "preco": st.column_config.NumberColumn("Preço", format="R$ %.2f"),
+    st.dataframe(reais(tab[["nome", "preco", "estoque"]], "preco"), hide_index=True, width="stretch", height=420,
+                 column_config={"nome": "Produto", "preco": "Preço",
                                 "estoque": "Em estoque"})
 
 
@@ -843,10 +962,10 @@ def periodo(nome):
     return datetime(2000, 1, 1), hoje + timedelta(days=1)
 
 
-def vendas_periodo(nome, loja):
+def vendas_periodo(nome, loja, intervalo=None):
     v = carregar("Vendas").copy()
     v["dt"] = pd.to_datetime(v["data"], errors="coerce")
-    a, b = periodo(nome)
+    a, b = intervalo or periodo(nome)
     v = v[(v["dt"] >= a) & (v["dt"] < b)]
     if loja != "Todas":
         v = v[v["loja"] == loja]
@@ -856,6 +975,7 @@ def vendas_periodo(nome, loja):
 # ---------------------------------------------------------------- VENDAS FEITAS
 def tela_vendas(loja_atual):
     st.markdown("#### Vendas feitas")
+    lancar_total_do_dia(loja_atual)
     if eh_dona():
         c1, c2 = st.columns(2)
         per = c1.selectbox("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"])
@@ -872,20 +992,20 @@ def tela_vendas(loja_atual):
         return
     mostra = v.assign(hora=v["dt"].dt.strftime("%d/%m %H:%M"), pagamento=v["forma"].map(NOME_FORMA).fillna(v["forma"]),
                       situacao=v["status"].map({"ok": "ok", "cancelada": "CANCELADA"}))
-    st.dataframe(mostra[["id", "hora", "loja", "vendedor", "pagamento", "total", "situacao"]], hide_index=True,
+    st.dataframe(reais(mostra[["id", "hora", "loja", "vendedor", "pagamento", "total", "situacao"]], "total"), hide_index=True,
                  width="stretch", height=320,
                  column_config={"id": "Venda", "hora": "Quando", "loja": "Loja", "vendedor": "Vendedor(a)",
-                                "pagamento": "Pagamento", "total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
+                                "pagamento": "Pagamento", "total": "Total",
                                 "situacao": "Situação"})
     escolha = st.selectbox("Ver itens de uma venda", v["id"].tolist(), index=None, placeholder="Escolha a venda…",
                            format_func=lambda i: f"{i} · {brl(v.set_index('id').at[i, 'total'])}")
     if escolha:
         it = carregar("Itens")
         it = it[it["venda_id"] == escolha]
-        st.dataframe(it[["produto", "qtd", "preco", "total"]], hide_index=True, width="stretch",
+        st.dataframe(reais(it[["produto", "qtd", "preco", "total"]], "preco", "total"), hide_index=True, width="stretch",
                      column_config={"produto": "Produto", "qtd": "Qtd",
-                                    "preco": st.column_config.NumberColumn("Preço", format="R$ %.2f"),
-                                    "total": st.column_config.NumberColumn("Total", format="R$ %.2f")})
+                                    "preco": "Preço",
+                                    "total": "Total"})
         if v.set_index("id").at[escolha, "status"] != "cancelada" and not eh_dona():
             st.caption("Para cancelar uma venda, peça para a dona.")
         elif v.set_index("id").at[escolha, "status"] != "cancelada":
@@ -898,6 +1018,27 @@ def tela_vendas(loja_atual):
                     st.rerun()
 
 
+
+
+def lancar_total_do_dia(loja_atual):
+    """Para registrar o total de um dia em que não se usou o app (não mexe no estoque)."""
+    with st.expander("Lançar o total de um dia passado", icon=":material/edit_calendar:"):
+        with st.form("lanc_total", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            dia = c1.date_input("Dia", value=agora().date() - timedelta(days=1), max_value=agora().date(), format="DD/MM/YYYY")
+            loja = c2.selectbox("Loja", LOJAS, index=LOJAS.index(loja_atual)) if eh_dona() else loja_atual
+            valor = st.number_input("Total vendido no dia (R$)", min_value=0.0, step=10.0, format="%.2f")
+            forma = st.selectbox("Forma de pagamento", ["Não informado", *FORMAS])
+            if st.form_submit_button("Lançar", type="primary", width="stretch"):
+                if valor <= 0:
+                    st.error("Informe o valor.")
+                else:
+                    banco().anexar("Vendas", [venda_so_total(
+                        novo_id("VANT"), f"{dia:%Y-%m-%d} 22:00:00", loja, round(valor, 2),
+                        forma="nao_informado" if forma == "Não informado" else FORMAS[forma],
+                        usuario=st.session_state.usuario)])
+                    gravou()
+                    st.success(f"Lançado: {brl(valor)} em {dia:%d/%m/%Y} · {loja}.")
 # ---------------------------------------------------------------- PAINEL
 def excel(vendas, itens):
     buf = io.BytesIO()
@@ -907,15 +1048,82 @@ def excel(vendas, itens):
     return buf.getvalue()
 
 
+VINHO_G, OURO_G = "#7A1726", "#E0A21B"
+_EIXO_R = ("'R$ ' + replace(datum.value >= 1e6 ? format(datum.value / 1e6, '.1f') + ' Mi' : "
+           "datum.value >= 1e3 ? format(datum.value / 1e3, '.1f') + ' mil' : format(datum.value, '.0f'), '.', ',')")
+
+
+def grafico(df, x, y="total", cor=None, horizontal=False, ordem=None, altura=260):
+    """Barras com eixo em R$ abreviado e valor exato ao passar o dedo/mouse."""
+    df = df.copy()
+    df["Valor"] = df[y].map(brl)
+    eixo_cat = alt.Axis(labelAngle=0, labelLimit=160, title=None, labelFontSize=13)
+    eixo_val = alt.Axis(labelExpr=_EIXO_R, title=None, labelFontSize=12, grid=True, tickCount=5)
+    cat = alt.X(f"{x}:N", sort=ordem, axis=eixo_cat) if not horizontal else alt.Y(f"{x}:N", sort=ordem, axis=eixo_cat)
+    val = alt.Y(f"{y}:Q", axis=eixo_val) if not horizontal else alt.X(f"{y}:Q", axis=eixo_val)
+    enc = {"x": cat, "y": val} if not horizontal else {"y": cat, "x": val}
+    tip = [alt.Tooltip(f"{x}:N", title=""), alt.Tooltip("Valor:N", title="Total")]
+    if cor:
+        enc["color"] = alt.Color(f"{cor}:N", scale=alt.Scale(range=[VINHO_G, OURO_G]), legend=alt.Legend(orient="bottom", title=None))
+        enc["xOffset" if not horizontal else "yOffset"] = alt.XOffset(f"{cor}:N") if not horizontal else alt.YOffset(f"{cor}:N")
+        tip.insert(1, alt.Tooltip(f"{cor}:N", title="Loja"))
+        marca = alt.Chart(df).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5)
+    else:
+        marca = alt.Chart(df).mark_bar(color=VINHO_G if not horizontal else OURO_G, cornerRadius=5)
+    graf = marca.encode(**enc, tooltip=tip).properties(height=altura)
+    st.altair_chart(graf.configure(background="#FFFFFF").configure_view(strokeWidth=0).configure_axis(domain=False),
+                    width="stretch")
+
+
+def destaques(v, it):
+    """Frases curtas com o que mais chama atenção no período."""
+    real = v[~v["id"].astype(str).str.startswith("VANT")]       # lançamentos só de total não têm hora real
+    frases = []
+    if len(v):
+        por_dia = v.groupby(v["dt"].dt.date)["total"].sum()
+        if len(por_dia) > 1:
+            d = por_dia.idxmax()
+            frases.append(("Melhor dia", f"{d:%d/%m} · {brl_curto(por_dia.max())}"))
+        if len(real):
+            hora = real.groupby(real["dt"].dt.hour)["total"].sum()
+            frases.append(("Horário mais forte", f"{int(hora.idxmax()):02d}h às {int(hora.idxmax()) + 1:02d}h"))
+        formas = v.groupby("forma")["total"].sum()
+        formas = formas[formas.index != "nao_informado"]
+        if len(formas) and formas.sum():
+            frases.append(("Forma mais usada", f"{NOME_FORMA.get(formas.idxmax(), formas.idxmax())} · "
+                                               f"{formas.max() / formas.sum() * 100:.0f}% do valor"))
+        vend = v[v["vendedor"] != "Não informado"].groupby("vendedor")["total"].sum()
+        if len(vend):
+            frases.append(("Quem mais vendeu", f"{vend.idxmax()} · {brl_curto(vend.max())}"))
+    if len(it):
+        top = it.groupby("produto")["qtd"].sum()
+        frases.append(("Produto campeão", f"{top.idxmax().title()[:40]} · {int(top.max())} peça(s)"))
+    if frases:
+        st.markdown("<div class='destaques'>" + "".join(
+            f"<div class='dest'><span>{t}</span><b>{x}</b></div>" for t, x in frases) + "</div>", unsafe_allow_html=True)
+
+
 def tela_painel(loja_atual):
     dona = True  # todas as lojas veem os próprios números e o total das duas
     st.markdown("#### Indicadores")
     loja = st.segmented_control("Ver", [*LOJAS, "Todas"], default=loja_atual, key="painel_loja",
                                 format_func=lambda l: "Tudo junto" if l == "Todas" else l) or loja_atual
-    per = st.segmented_control("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo"],
+    per = st.segmented_control("Período", ["Hoje", "Ontem", "7 dias", "30 dias", "Este mês", "Tudo", "Escolher datas"],
                                default="7 dias", key="painel_per") or "7 dias"
-    v, a, b = vendas_periodo(per, loja)
+    intervalo = None
+    if per == "Escolher datas":
+        hoje = agora().date()
+        sel = st.date_input("De / até", value=(hoje - timedelta(days=6), hoje), max_value=hoje,
+                            format="DD/MM/YYYY", key="painel_datas")
+        ini_d, fim_d = (sel if isinstance(sel, (tuple, list)) and len(sel) == 2 else (sel[0] if isinstance(sel, (tuple, list)) else sel,) * 2)
+        intervalo = (datetime.combine(ini_d, datetime.min.time()), datetime.combine(fim_d, datetime.min.time()) + timedelta(days=1))
+    v, a, b = vendas_periodo(per, loja, intervalo)
     v = v[v["status"] != "cancelada"]
+    vendedores = sorted(v["vendedor"].dropna().unique())
+    if len(vendedores) > 1:
+        quem = st.selectbox("Vendedor(a)", ["Todos", *vendedores], key="painel_vend")
+        if quem != "Todos":
+            v = v[v["vendedor"] == quem]
     it = carregar("Itens")
     it = it[it["venda_id"].isin(v["id"])]
 
@@ -925,6 +1133,8 @@ def tela_painel(loja_atual):
     ant = todas[(todas["dt"] >= a - (b - a)) & (todas["dt"] < a) & (todas["status"] != "cancelada")]
     if loja != "Todas":
         ant = ant[ant["loja"] == loja]
+    if st.session_state.get("painel_vend", "Todos") != "Todos":
+        ant = ant[ant["vendedor"] == st.session_state["painel_vend"]]
     tot, n = v["total"].sum(), len(v)
     delta = None if per == "Tudo" or ant.empty else f"{(tot - ant['total'].sum()) / max(ant['total'].sum(), 0.01) * 100:+.0f}% vs. período anterior"
     custos = carregar("Produtos").set_index("id")["custo"]
@@ -934,20 +1144,22 @@ def tela_painel(loja_atual):
 
     com_custo = it[custo_de(it["produto_id"]) > 0]
     lucro = (com_custo["total"] - com_custo["qtd"] * custo_de(com_custo["produto_id"])).sum()
-    desc_rateio = v["desconto"].sum()
+    desc_rateio = v.loc[v["id"].isin(it["venda_id"]), "desconto"].sum()
     k = st.container(key="kpis")
     cols = k.columns(3) + k.columns(2 if dona else 1)
-    cols[0].metric("Total vendido", brl(tot), delta)
-    cols[1].metric("Vendas", n)
-    cols[2].metric("Venda média", brl(tot / n if n else 0))
-    cols[3].metric("Peças vendidas", int(it["qtd"].sum()))
-    if dona:  # o lucro mostra a margem: só a dona vê
-        cols[4].metric("Lucro bruto estimado", brl(lucro - desc_rateio),
-                       help="Preço de venda menos o custo atual do produto, já tirando os descontos. "
-                            "Produtos sem custo (lingerie e prótese por faixa) ficam de fora.")
+    metrica(cols[0], "Total vendido", tot, delta)
+    metrica(cols[1], "Vendas", n, dinheiro=False)
+    metrica(cols[2], "Venda média", tot / n if n else 0)
+    metrica(cols[3], "Peças vendidas", it["qtd"].sum(), dinheiro=False,
+            ajuda="Só conta vendas feitas no caixa (os lançamentos só de total não têm peças).")
+    if dona:
+        metrica(cols[4], "Lucro bruto estimado", lucro - desc_rateio,
+                ajuda="Preço de venda menos o custo atual do produto, já tirando os descontos. "
+                      "Ficam de fora: produtos sem custo (lingerie e prótese por faixa) e lançamentos só de total.")
     if v.empty:
         st.info("Nenhuma venda nesse período.")
         return
+    destaques(v, it)
 
     if dona and loja == "Todas":
         st.markdown("**Comparativo das lojas**")
@@ -956,63 +1168,77 @@ def tela_painel(loja_atual):
             vl = v[v["loja"] == l]
             il = it[it["venda_id"].isin(vl["id"])]
             cl = il[custo_de(il["produto_id"]) > 0]
-            luc = (cl["total"] - cl["qtd"] * custo_de(cl["produto_id"])).sum() - vl["desconto"].sum()
+            luc = (cl["total"] - cl["qtd"] * custo_de(cl["produto_id"])).sum() - vl.loc[vl["id"].isin(il["venda_id"]), "desconto"].sum()
             linha = {"Loja": l, "Total": vl["total"].sum(), "Vendas": len(vl),
                      "Venda média": vl["total"].sum() / len(vl) if len(vl) else 0, "Peças": int(il["qtd"].sum()),
                      "Lucro estimado": luc, "Parte do total": vl["total"].sum() / tot if tot else 0}
-            for k, nome in NOME_FORMA.items():
-                linha[nome] = vl.loc[vl["forma"] == k, "total"].sum()
+            for kf, nome in NOME_FORMA.items():
+                linha[nome] = vl.loc[vl["forma"] == kf, "total"].sum()
             linhas.append(linha)
         comp = pd.DataFrame(linhas)
-        dinheiro = {c: st.column_config.NumberColumn(c, format="R$ %.2f") for c in
-                    ["Total", "Venda média", "Lucro estimado", *NOME_FORMA.values()]}
-        st.dataframe(comp, hide_index=True, width="stretch",
-                     column_config={**dinheiro, "Parte do total": st.column_config.ProgressColumn(
+        comp = comp.loc[:, (comp != 0).any(axis=0) | comp.columns.isin(["Loja", "Total", "Vendas"])]
+        dinheiro = [c for c in ["Total", "Venda média", "Lucro estimado", *NOME_FORMA.values()] if c in comp]
+        st.dataframe(reais(comp, *dinheiro), hide_index=True, width="stretch",
+                     column_config={"Parte do total": st.column_config.ProgressColumn(
                          "Parte do total", format="percent", min_value=0, max_value=1)})
         st.markdown("**Por dia, loja a loja**")
-        por_dia = v.pivot_table(index=v["dt"].dt.date, columns="loja", values="total", aggfunc="sum", fill_value=0)
-        por_dia.index = pd.to_datetime(por_dia.index)
-        st.bar_chart(por_dia, color=["#7A1726", "#E0A21B"][:len(por_dia.columns)], stack=False, y_label="R$", x_label="")
+        pd_l = v.groupby([v["dt"].dt.date.rename("d"), "loja"])["total"].sum().reset_index()
+        ordem = sorted(pd_l["d"].unique())
+        pd_l["Dia"] = pd_l["d"].map(lambda d: f"{d:%d/%m}")
+        grafico(pd_l, "Dia", cor="loja", ordem=[f"{d:%d/%m}" for d in ordem])
 
     g1, g2 = st.columns(2)
     with g1:
         st.markdown("**Por forma de pagamento**")
-        f = v.groupby("forma")["total"].sum().rename(index=NOME_FORMA).sort_values(ascending=False)
-        st.bar_chart(f, horizontal=True, color="#E0A21B", y_label="", x_label="R$")
+        f = v.groupby("forma")["total"].sum().rename(index=NOME_FORMA).sort_values(ascending=False).reset_index()
+        f.columns = ["Forma", "total"]
+        grafico(f, "Forma", horizontal=True, ordem=list(f["Forma"]), altura=max(140, 52 * len(f)))
     with g2:
         st.markdown("**Por dia**")
-        dia = v.groupby(v["dt"].dt.date)["total"].sum()
-        dia.index = pd.to_datetime(dia.index)
-        st.bar_chart(dia, color="#7A1726", y_label="R$", x_label="")
+        dia = v.groupby(v["dt"].dt.date.rename("d"))["total"].sum().reset_index()
+        dia["Dia"] = dia["d"].map(lambda d: f"{d:%d/%m}")
+        grafico(dia, "Dia", ordem=list(dia["Dia"]))
 
     g3, g4 = st.columns(2)
     with g3:
         st.markdown("**Por vendedor(a)**")
         eq = v.groupby("vendedor").agg(total=("total", "sum"), vendas=("id", "count"))
         eq["média"] = eq["total"] / eq["vendas"]
-        st.dataframe(eq.sort_values("total", ascending=False), width="stretch",
-                     column_config={"total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
-                                    "média": st.column_config.NumberColumn("Venda média", format="R$ %.2f")})
+        st.dataframe(reais(eq.sort_values("total", ascending=False).rename_axis("Vendedor(a)"), "total", "média"), width="stretch",
+                     column_config={"total": "Total",
+                                    "vendas": "Vendas",
+                                    "média": "Venda média"})
     with g4:
         st.markdown("**Vendedor(a) × pagamento**")
         cruz = v.pivot_table(index="vendedor", columns="forma", values="total", aggfunc="sum", fill_value=0)
         cruz.columns = [NOME_FORMA.get(c, c) for c in cruz.columns]
-        st.dataframe(cruz, width="stretch",
-                     column_config={c: st.column_config.NumberColumn(c, format="R$ %.2f") for c in cruz.columns})
+        cruz = cruz.loc[cruz.sum(axis=1) > 0, cruz.sum(axis=0) > 0]
+        st.dataframe(reais(cruz.rename_axis("Vendedor(a)")), width="stretch")
 
     g5, g6 = st.columns(2)
     with g5:
         st.markdown("**Mais vendidos**")
-        top = it.groupby("produto").agg(qtd=("qtd", "sum"), total=("total", "sum")).sort_values("qtd", ascending=False).head(10)
-        st.dataframe(top, width="stretch",
-                     column_config={"qtd": "Peças", "total": st.column_config.NumberColumn("Total", format="R$ %.2f")})
+        if it.empty:
+            st.caption("Sem peças no período (só lançamentos de total).")
+        else:
+            top = it.groupby("produto").agg(qtd=("qtd", "sum"), total=("total", "sum")).sort_values("qtd", ascending=False).head(10)
+            top = top.reset_index()
+            top["produto"] = top["produto"].str.title()
+            st.dataframe(reais(top, "total"), hide_index=True, width="stretch", column_order=["qtd", "produto", "total"],
+                         column_config={"qtd": st.column_config.NumberColumn("Peças", width="small"),
+                                        "produto": st.column_config.TextColumn("Produto", width="medium"), "total": "Total"})
     with g6:
         st.markdown("**Por horário**")
-        hora = v.groupby(v["dt"].dt.hour)["total"].sum()
-        hora.index = [f"{h:02d}h" for h in hora.index]
-        st.bar_chart(hora, color="#7A1726", y_label="R$", x_label="")
+        real = v[~v["id"].astype(str).str.startswith("VANT")]
+        if real.empty:
+            st.caption("Sem vendas com horário no período.")
+        else:
+            hora = real.groupby(real["dt"].dt.hour)["total"].sum().reset_index()
+            hora.columns = ["h", "total"]
+            hora["Hora"] = hora["h"].map(lambda x: f"{int(x):02d}h")
+            grafico(hora, "Hora", ordem=list(hora["Hora"]))
 
-    st.download_button("Baixar estas vendas em Excel", icon=":material/download:", data= excel(v, it),
+    st.download_button("Baixar estas vendas em Excel", icon=":material/download:", data=excel(v, it),
                        file_name=f"vendas-{per.lower().replace(' ', '-')}-{agora():%Y-%m-%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -1110,10 +1336,10 @@ def tela_caixa(loja):
     if e["inicio"].date() < agora().date():
         st.warning("Este caixa é de outro dia. Feche agora e abra um novo.")
     m1, m2, m3 = st.container(key="kpis").columns(3)
-    m1.metric("Vendido no caixa", brl(v["total"].sum()), f"{len(v)} venda(s)", delta_color="off")
-    m2.metric("Dinheiro na gaveta", brl(e["esperado"]), help="Troco inicial + vendas em dinheiro + reforços − retiradas")
-    m3.metric("Pix + cartões", brl(sum(e["por"].get(k, 0) for k in ("pix", "credito", "debito"))))
-    st.dataframe(pd.DataFrame([{"Forma": NOME_FORMA[k], "Total": brl(e["por"].get(k, 0))} for k in NOME_FORMA]),
+    metrica(m1, "Vendido no caixa", v["total"].sum(), f"{len(v)} venda(s)", delta_color="off")
+    metrica(m2, "Dinheiro na gaveta", e["esperado"], ajuda="Troco inicial + vendas em dinheiro + reforços − retiradas")
+    metrica(m3, "Pix + cartões", sum(e["por"].get(k, 0) for k in ("pix", "credito", "debito")))
+    st.dataframe(pd.DataFrame([{"Forma": NOME_FORMA[k], "Total": brl(e["por"].get(k, 0))} for k in FORMAS.values()]),
                  hide_index=True, width="stretch")
 
     c1, c2 = st.columns(2)
@@ -1190,9 +1416,11 @@ def tela_hoje(loja):
             st.rerun()
 
     m1, m2, m3, m4 = st.container(key="kpis").columns(4)
-    m1.metric("Vendido hoje", brl(t), f"{(t - to) / to * 100:+.0f}% que ontem" if to else None)
-    m2.metric("Vendas hoje", len(vh))
-    m3.metric("Venda média", brl(t / len(vh) if len(vh) else 0))
+    if not len(vh) and to:
+        st.caption(f"Ontem esta loja vendeu {brl(to)} em {len(vo)} venda(s). Os números de hoje começam do zero.")
+    metrica(m1, "Vendido hoje", t, f"{(t - to) / to * 100:+.0f}% que ontem" if to else None)
+    metrica(m2, "Vendas hoje", len(vh), dinheiro=False)
+    metrica(m3, "Venda média", t / len(vh) if len(vh) else 0)
     m4.metric("Caixa", {"aberto": "Aberto", "fechado": "Fechado", "nunca": "Fechado"}[e["situacao"]],
               f"desde {e['inicio']:%H:%M}" if e["situacao"] == "aberto" else None, delta_color="off")
 
@@ -1226,10 +1454,30 @@ def tela_hoje(loja):
 
 
 # ---------------------------------------------------------------- app
+def bloquear_sem_planilha():
+    """Na nuvem, sem a planilha ligada, nada pode ser vendido: tudo se perderia quando o app dormir."""
+    if not (NA_NUVEM and isinstance(banco(), BancoLocal)):
+        return
+    motivo = erro_nos_secrets()
+    falta = []
+    if not credenciais():
+        falta.append("a chave do Google (gcp_service_account ou gcp_json)")
+    if not segredo("planilha", "endereco"):
+        falta.append("o endereço da planilha ([planilha] endereco)")
+    st.error("### O caixa está DESLIGADO da planilha\n"
+             "Para não perder nenhuma venda, o app está travado até a ligação com a planilha do Google voltar.\n\n"
+             + (f"**Problema nos Secrets:** {motivo}\n\n" if motivo else "")
+             + (f"**Falta nos Secrets:** {' e '.join(falta)}.\n\n" if falta else "")
+             + "**Como resolver:** Manage app → ⋮ → Settings → Secrets → conferir/colar de novo → Save → "
+               "depois Manage app → ⋮ → Reboot app.", icon=":material/cloud_off:")
+    st.stop()
+
+
 def main():
     st.set_page_config(page_title="Caixa Jardim do Éden", page_icon=os.path.join(PASTA, "logo.png"),
                        layout="wide", initial_sidebar_state="collapsed")
     aplicar_estilo()
+    bloquear_sem_planilha()
     if "usuario" not in st.session_state:
         u = ler_token(st.query_params.get("k", ""))
         if u:
@@ -1239,6 +1487,7 @@ def main():
             return
     try:
         preparar_produtos()
+        garantir_lancamentos_iniciais()
     except Exception as e:
         st.error(f"Não consegui abrir a planilha. Confira a internet e a configuração. ({e})")
         st.stop()
@@ -1258,6 +1507,13 @@ def main():
         loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
         st.query_params["loja"] = str(LOJAS.index(loja))
     with topo3.popover("Conta", width="stretch", icon=":material/person:"):
+        if isinstance(banco(), BancoSheets):
+            n_v = len(carregar("Vendas"))
+            st.success(f"Ligado à planilha do Google · {n_v} venda(s) guardada(s)", icon=":material/cloud_done:")
+            st.link_button("Abrir a planilha", str(segredo("planilha", "endereco")), width="stretch",
+                           icon=":material/table_view:")
+        else:
+            st.warning("Sem planilha: modo de teste neste computador.", icon=":material/cloud_off:")
         if st.button("Atualizar dados", width="stretch", icon=":material/refresh:"):
             gravou()
             st.rerun()
@@ -1285,20 +1541,20 @@ def main():
             st.session_state.sub = M_PAINEL
         with st.container(key="submenu"):
             tela = st.segmented_control("Mais", sub_menu, key="sub", label_visibility="collapsed", width="stretch") or M_PAINEL
-    if tela == M_HOJE:
-        tela_hoje(loja)
-    elif tela == M_CAIXA:
-        tela_caixa(loja)
-    elif tela == M_VENDER:
-        tela_vender(loja)
-    elif tela == M_EST:
-        tela_estoque(loja)
-    elif tela == M_PROD and eh_dona():
-        tela_produtos()
-    elif tela == M_VENDAS:
-        tela_vendas(loja)
-    elif tela == M_PAINEL:
-        tela_painel(loja)
+    telas = {M_HOJE: tela_hoje, M_CAIXA: tela_caixa, M_VENDER: tela_vender, M_EST: tela_estoque,
+             M_VENDAS: tela_vendas, M_PAINEL: tela_painel, M_PROD: lambda _l: tela_produtos()}
+    try:
+        telas.get(tela, tela_hoje)(loja)
+    except Exception as e:  # st.rerun/st.stop não são Exception: passam direto
+        if nao_salvou(e):
+            st.error("**Isto NÃO foi salvo na planilha.** A internet ou o Google falhou na hora de gravar. "
+                     "Confira a internet e faça de novo.", icon=":material/cloud_off:")
+        else:
+            st.error("Não consegui carregar esta tela agora. Confira a internet e toque em **Tentar de novo**. "
+                     "Se algo foi digitado, confira se foi salvo antes de repetir.", icon=":material/error:")
+        st.button("Tentar de novo", type="primary", icon=":material/refresh:", on_click=gravou)
+        with st.expander("Detalhes técnicos (para o suporte)"):
+            st.code(nao_salvou(e) or f"{type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
