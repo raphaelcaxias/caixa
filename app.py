@@ -220,6 +220,7 @@ def tentar(fn, *a, tentativas=3, **k):
 @_protege_gravacao
 class BancoSheets:
     """Planilha do Google: as duas lojas gravam no mesmo lugar."""
+    na_planilha = True
 
     def __init__(self, credenciais, planilha):
         import gspread
@@ -342,6 +343,11 @@ def _sheets(planilha, email):
 @st.cache_resource(show_spinner=False)
 def _local():
     return BancoLocal(os.path.join(PASTA, "dados"))
+
+
+def na_planilha():
+    """Pelo atributo e não por isinstance: o banco fica em cache e a classe muda a cada execução do app."""
+    return getattr(banco(), "na_planilha", False)
 
 
 def banco():
@@ -591,12 +597,14 @@ def tela_vender(loja):
     # ---- venda acabou de ser feita
     if st.session_state.get("ultima") and not cart:
         u = st.session_state.ultima
-        st.markdown(f"""<div class='ok-card'><div class='ok-ic'>✓</div><div>
-            <div class='ok-t'>Venda feita!</div>
-            <div class='ok-s'>{brl(u['total'])} · {NOME_FORMA[u['forma']]} · {u['vendedor']}</div>
-            {f"<div class='ok-troco'>Troco: {brl(u['troco'])}</div>" if u['forma'] == 'dinheiro' and float(u['troco']) > 0 else ""}
-            {"<div class='ok-s' style='font-size:.95rem;opacity:.85'>✓ Guardada na planilha</div>" if isinstance(banco(), BancoSheets) else ""}
-            </div></div>""", unsafe_allow_html=True)
+        # HTML numa linha só: linha em branco + recuo viraria "bloco de código" e mostraria </div> na tela
+        troco = (f"<div class='ok-troco'>Troco: {brl(u['troco'])}</div>"
+                 if u["forma"] == "dinheiro" and float(u["troco"]) > 0 else "")
+        salvo = ("<div class='ok-s' style='font-size:.95rem;opacity:.85'>✓ Guardada na planilha</div>"
+                 if na_planilha() else "")
+        st.markdown(f"<div class='ok-card'><div class='ok-ic'>✓</div><div><div class='ok-t'>Venda feita!</div>"
+                    f"<div class='ok-s'>{brl(u['total'])} · {NOME_FORMA.get(u['forma'], u['forma'])} · {u['vendedor']}</div>"
+                    f"{troco}{salvo}</div></div>", unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         if c1.button("Nova venda", type="primary", width="stretch", icon=":material/add_shopping_cart:"):
             st.session_state.ultima = None
@@ -1477,7 +1485,7 @@ def tela_hoje(loja):
 # ---------------------------------------------------------------- app
 def bloquear_sem_planilha():
     """Na nuvem, sem a planilha ligada, nada pode ser vendido: tudo se perderia quando o app dormir."""
-    if not (NA_NUVEM and isinstance(banco(), BancoLocal)):
+    if not (NA_NUVEM and not na_planilha()):
         return
     motivo = erro_nos_secrets() or _credenciais()[1]
     falta = []
@@ -1528,7 +1536,7 @@ def main():
         loja = topo2.selectbox("Loja", LOJAS, key="loja", label_visibility="collapsed")
         st.query_params["loja"] = str(LOJAS.index(loja))
     with topo3.popover("Conta", width="stretch", icon=":material/person:"):
-        if isinstance(banco(), BancoSheets):
+        if na_planilha():
             n_v = len(carregar("Vendas"))
             st.success(f"Ligado à planilha do Google · {n_v} venda(s) guardada(s)", icon=":material/cloud_done:")
             st.link_button("Abrir a planilha", str(segredo("planilha", "endereco")), width="stretch",
@@ -1542,7 +1550,7 @@ def main():
             st.session_state.clear()
             st.query_params.pop("k", None)
             st.rerun()
-    if isinstance(banco(), BancoLocal):
+    if not na_planilha():
         falta = [n for n, ok in [("a chave do Google (gcp_json ou gcp_service_account)", credenciais()),
                                  ("o endereço da planilha ([planilha] endereco)", segredo("planilha", "endereco"))] if not ok]
         st.warning("**Modo de teste** — as vendas NÃO estão indo para a planilha. Falta nos Secrets: "
