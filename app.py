@@ -37,6 +37,19 @@ LANCAMENTOS_INICIAIS = [
     {"id": "VANT-20261119-ATE-1", "data": "2026-11-19 12:10:00", "loja": "Aterrado", "total": 50.00, "forma": "pix"},
     {"id": "VANT-20261119-ATE-2", "data": "2026-11-19 12:15:00", "loja": "Aterrado", "total": 59.99, "forma": "debito"},
     {"id": "VANT-20261119-ATE-3", "data": "2026-11-19 12:20:00", "loja": "Aterrado", "total": 74.99, "forma": "debito"},
+    # Aterrado 24, 25 e 26/11: vendas anotadas enquanto o caixa estava fora do ar (só o total; pagamento não informado)
+    {"id": "VANT-20261124-ATE-1", "data": "2026-11-24 18:01:00", "loja": "Aterrado", "total": 134.99},
+    {"id": "VANT-20261124-ATE-2", "data": "2026-11-24 18:02:00", "loja": "Aterrado", "total": 30.00},
+    {"id": "VANT-20261124-ATE-3", "data": "2026-11-24 18:03:00", "loja": "Aterrado", "total": 110.00},
+    {"id": "VANT-20261125-ATE-1", "data": "2026-11-25 18:01:00", "loja": "Aterrado", "total": 50.00},
+    {"id": "VANT-20261125-ATE-2", "data": "2026-11-25 18:02:00", "loja": "Aterrado", "total": 75.00},
+    {"id": "VANT-20261125-ATE-3", "data": "2026-11-25 18:03:00", "loja": "Aterrado", "total": 10.00},
+    {"id": "VANT-20261125-ATE-4", "data": "2026-11-25 18:04:00", "loja": "Aterrado", "total": 99.00},
+    {"id": "VANT-20261126-ATE-1", "data": "2026-11-26 18:01:00", "loja": "Aterrado", "total": 150.00},
+    {"id": "VANT-20261126-ATE-2", "data": "2026-11-26 18:02:00", "loja": "Aterrado", "total": 120.00},
+    {"id": "VANT-20261126-ATE-3", "data": "2026-11-26 18:03:00", "loja": "Aterrado", "total": 99.99},
+    {"id": "VANT-20261126-ATE-4", "data": "2026-11-26 18:04:00", "loja": "Aterrado", "total": 120.00},
+    {"id": "VANT-20261126-ATE-5", "data": "2026-11-26 18:05:00", "loja": "Aterrado", "total": 52.00},
 ]
 
 ABAS = {
@@ -259,6 +272,11 @@ class BancoPonte:
     def _pedir(self, acao, aba, **dados):
         def uma_vez():
             r = self.s.post(self.url, json={"senha": self.senha, "acao": acao, "aba": aba, **dados}, timeout=40)
+            if r.status_code in (401, 403, 404):
+                raise RuntimeError(
+                    f"o Google recusou a ponte (erro {r.status_code}). Na planilha: Extensões → Apps Script → "
+                    "Implantar → Gerenciar implantações → lápis ✏️ → Versão: Nova versão → Implantar "
+                    "(autorize se pedir). O link continua o mesmo.")
             r.raise_for_status()  # 429/5xx -> tentar de novo
             try:
                 resp = r.json()
