@@ -323,9 +323,10 @@ class BancoPonte:
     """Planilha do Google pela ponte (Apps Script da própria planilha). Link e senha vêm dos Secrets."""
     na_planilha = True
 
-    def __init__(self, url, senha):
+    def __init__(self, url, senhas):
         import requests
-        self.url, self.senha, self.s = url, senha, requests.Session()
+        self.senhas = [senhas] if isinstance(senhas, str) else list(senhas)
+        self.url, self.senha, self.s = url, self.senhas[0], requests.Session()
         self.tem_acao_venda = None  # descobre na 1ª venda se a ponte já é a versão 2
 
     def _pedir(self, acao, aba, **dados):
@@ -345,7 +346,15 @@ class BancoPonte:
             if not resp.get("ok"):
                 raise RuntimeError(f"a ponte recusou: {resp.get('erro')}")
             return resp.get("dados")
-        return tentar(uma_vez)
+        try:
+            return tentar(uma_vez)
+        except RuntimeError as e:
+            # ponte ainda com a senha antiga (ou já com a nova): tenta a outra senha configurada e fica com a que vale
+            outras = [s for s in self.senhas if s != self.senha]
+            if "senha da ponte errada" not in str(e) or not outras:
+                raise
+            self.senha = outras[0]
+            return tentar(uma_vez)
 
     def ler(self, aba):
         return tabela(self._pedir("ler", aba), ABAS[aba])
@@ -437,14 +446,38 @@ class BancoSheets:
             tentar(w.update_cell, coluna.index(chave) + 1, cols.index(col) + 1, valor)
 
 
-def segredo(*chaves):
+ARQUIVO_CONFIG = "configuracao.toml"
+
+
+@st.cache_resource(show_spinner=False)
+def _config_arquivo(caminho, mudou):
+    """Configuração num arquivo ao lado do app.py (alternativa aos Secrets do Streamlit)."""
+    import tomllib
+    with open(caminho, "rb") as f:
+        return tomllib.load(f)
+
+
+def config_arquivo():
+    caminho = os.path.join(PASTA, ARQUIVO_CONFIG)
+    if not os.path.exists(caminho):
+        return {}
     try:
-        v = st.secrets
-        for k in chaves:
-            v = v[k]
-        return v
+        return _config_arquivo(caminho, os.path.getmtime(caminho))
     except Exception:
-        return None
+        return {}
+
+
+def segredo(*chaves):
+    """Valor dos Secrets do Streamlit; se não estiver lá, do arquivo configuracao.toml."""
+    for fonte in ("secrets", "arquivo"):
+        try:
+            v = st.secrets if fonte == "secrets" else config_arquivo()
+            for k in chaves:
+                v = v[k]
+            return v
+        except Exception:
+            continue
+    return None
 
 
 # No Streamlit Cloud o app fica em /mount/src. Lá, arquivos locais SOMEM quando o app dorme:
@@ -507,16 +540,17 @@ def na_planilha():
 
 
 def ponte():
-    """Link e senha da ponte, só dos Secrets ([ponte] url e senha). Nada fica escrito no código."""
+    """Link e senha(s) da ponte, dos Secrets ou do configuracao.toml ([ponte] url, senha e, se houver, senha_antiga)."""
     url = str(segredo("ponte", "url") or "").strip()
-    senha = str(segredo("ponte", "senha") or "").strip()
+    senhas = tuple(s for s in (str(segredo("ponte", "senha") or "").strip(),
+                               str(segredo("ponte", "senha_antiga") or "").strip()) if s)
     ok = url.startswith("https://script.google.com/") or url.startswith("http://127.0.0.1:")  # o 2º é só para os testes
-    return (url, senha) if ok and senha else None
+    return (url, senhas) if ok and senhas else None
 
 
 @st.cache_resource(show_spinner=False)
-def _ponte(url, senha):
-    return BancoPonte(url, senha)
+def _ponte(url, senhas):
+    return BancoPonte(url, senhas)
 
 
 def banco():
