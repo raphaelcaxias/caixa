@@ -1,76 +1,119 @@
-# Caixa Jardim do Éden — Streamlit
+# Caixa Jardim do Éden
 
-Sistema de caixa no navegador, com login. As vendas ficam gravadas numa **planilha do Google**, então as duas lojas usam a mesma planilha.
+Sistema de caixa (PDV) das lojas **Aterrado** e **Vila Santa Cecília**. Roda no navegador (computador e celular) pelo Streamlit Community Cloud e guarda tudo numa **planilha do Google**, por meio de uma "ponte" em Apps Script.
 
-## O que tem no app
-- **Login:** toque na loja (Aterrado ou Vila Santa Cecília) e digite a senha. A senha fica nos *Secrets* (ou como código embaralhado no app), nunca escrita às claras.
-  O login **continua valendo por 14 horas mesmo se recarregar a página**. Para isso, o app guarda uma chave no endereço da página.
-  Dica: entre uma vez em cada loja e salve a página nos favoritos. O favorito já abre na loja certa.
-- **Vendedor(a):** escolhido em cada venda (Raphael, Daiane, Norma, Outros). Os indicadores saem por loja e "Tudo junto".
-- **🏠 Hoje** (tela inicial): quanto vendeu hoje e a comparação com ontem, a situação do caixa, os botões rápidos, as vendas por forma de pagamento e por vendedor(a), e o que precisa repor.
-- **💰 Caixa:** abrir o caixa com o troco, registrar sangria (dinheiro que saiu) e reforço (dinheiro que entrou), e fechar contando a gaveta. O app diz se **sobrou ou faltou dinheiro** e monta o **resumo do dia para mandar no WhatsApp**.
-- **Vender:** procure pelo leitor de código de barras, pelo nome ou pelo valor. Por exemplo, digite `189` para ver os produtos de R$ 189,xx; se só houver um, ele já entra na venda. Na hora de fechar, é obrigatório escolher quem vendeu (Raphael, Daiane, Norma, Outros) e a forma de pagamento (Dinheiro com troco, Pix, Crédito, Débito). O desconto pode ser em R$ ou em %. Depois da venda, um botão manda o **comprovante pelo WhatsApp** para a cliente. O **custo não aparece** nessa tela.
-- **Estoque:** separado por loja. Tem "Chegou mercadoria" e "Contagem" para acertar o estoque.
-- **Produtos:** edite preço, custo e código direto na tabela. Tem o botão "Aplicar a regra" (custo × 5, final 9,99) e o cadastro de produto novo.
-- **Vendas:** lista das vendas feitas, com os itens de cada uma e a opção de cancelar.
-- **Painel:** período pronto ou **datas escolhidas**, filtro por loja e por vendedor(a), comparação com o período anterior, **Destaques** (melhor dia, horário mais forte, forma mais usada, quem mais vendeu, produto campeão), gráficos com valor exato ao tocar e download em Excel. Valores muito grandes aparecem abreviados (R$ 1,25 Mi) e o valor exato fica no (?) e nas tabelas.
-- **Proteções:** sem planilha ligada o app não abre na nuvem; se o Google oscilar ele tenta de novo sozinho; se mesmo assim não gravar, aparece em vermelho "Isto NÃO foi salvo".
+## Arquivos
+
+| Arquivo | O que é |
+|---|---|
+| `app.py` | O aplicativo, 1ª parte: configuração, planilha, login e venda (seções 1 a 6) |
+| `app_telas.py` | O aplicativo, 2ª parte: estoque, vendas, relatórios, caixa, início e menu (seções 7 a 12). Sobe **junto** com o app.py |
+| `estilo.css` | Visual: paleta oficial, fontes, celular e tablet |
+| `marca/` | Ícone de app (512 e 192), favicon (64 e 32), logo do login e logo horizontal |
+| `ponte-apps-script.gs` | Texto da ponte, que fica no Apps Script da planilha |
+| `produtos_iniciais.csv` | Os 247 produtos (usados só se a aba Produtos estiver vazia) |
+| `logo.png` | Logomarca original (base dos arquivos de `marca/`) |
+| `requirements.txt` | Bibliotecas Python |
+| `ferramentas/gerar_marca.py` | Gera os arquivos de `marca/` quando chegar a logomarca nova |
+| `tests/` | Testes automáticos. **Não sobem para o GitHub.** |
+
+Nenhuma senha, link ou chave fica escrita nos arquivos. Tudo vem dos **Secrets**.
+
+## Quem pode o quê
+
+O login continua por loja: a pessoa toca na loja e digita a senha. **A senha define o papel.** As permissões são conferidas no servidor antes de abrir cada tela e antes de cada gravação, não só escondendo botões.
+
+| | Vendedor(a) | Gerente | Dona |
+|---|:-:|:-:|:-:|
+| Vender, consultar produtos e estoque | ✓ | ✓ | ✓ |
+| Abrir caixa, sangria, reforço e fechar caixa (da própria loja) | ✓ | ✓ | ✓ |
+| Ver vendas | hoje e ontem | todo o histórico | todo o histórico |
+| Chegou mercadoria, contagem e acerto de estoque | | ✓ | ✓ |
+| Relatórios e Excel | | da própria loja | todas as lojas e "tudo junto" |
+| Custos, margem, cadastro e preço de produtos | | | ✓ |
+| Cancelar venda e lançar o total de um dia | | | ✓ |
+| Trocar de loja depois de entrar | | | ✓ |
+
+Use senhas **diferentes** para cada papel. Se duas forem iguais, vale a do papel mais alto.
+
+## Secrets (Streamlit → Manage app → ⋮ → Settings → Secrets)
+
+Apague tudo o que estiver lá e cole o modelo abaixo, trocando os valores entre aspas:
+
+```toml
+[ponte]
+url = "COLE AQUI O LINK DA PONTE (termina em /exec)"
+senha = "UMA SENHA NOVA E LONGA PARA A PONTE"
+
+[acessos]
+dona = "SENHA DA DONA"
+gerente = "SENHA DA GERENTE"
+vendedor = "SENHA DO(A) VENDEDOR(A)"
+
+[app]
+chave = "UMA FRASE LONGA QUALQUER, SÓ PARA ASSINAR OS LOGINS"
+
+[planilha]
+endereco = "LINK DA PLANILHA (opcional: aparece o botão Abrir a planilha)"
+```
+
+- A `senha` da ponte tem que ser **igual** à propriedade `SENHA` do Apps Script (passo 2 abaixo).
+- Trocar a senha de um papel desconecta, na hora, todos os aparelhos que estavam logados com ela.
+- Trocar a `chave` desconecta todo mundo.
+
+**Compatibilidade:** se a seção `[acessos]` ainda não existir, a senha antiga em `[usuarios] norma` continua entrando, com acesso de dona. Assim o caixa não trava no dia da atualização.
+
+## Atualizar (ordem certa para não parar o caixa)
+
+Faça com as lojas fechadas, para não haver venda no meio da troca.
+
+1. **Trocar a ponte:** na planilha, **Extensões → Apps Script**. Apague tudo, cole o `ponte-apps-script.gs` e salve com **Ctrl+S**.
+2. **Senha da ponte:** no Apps Script, clique na engrenagem **Configurações do projeto → Propriedades do script → Adicionar propriedade**. Em Propriedade, escreva `SENHA`; em Valor, a senha nova da ponte. Salve.
+3. **Publicar a ponte:** **Implantar → Gerenciar implantações →** lápis ✏️ **→ Versão: Nova versão → Implantar**. O link continua o mesmo. Para testar, abra o link: tem que aparecer *"Ponte do Caixa funcionando"*.
+4. **Secrets:** cole o modelo acima, já preenchido, e clique em **Save**.
+5. **GitHub (repositório `caixa`):** clique em **Add file → Upload files** e envie `app.py`, `app_telas.py`, `estilo.css`, `requirements.txt`, `LEIA-ME.md`, `produtos_iniciais.csv`, `logo.png`, `favicon-64.png`, `logo-login.png` e `boutique-640.jpg` (as imagens podem ir soltas, sem pasta). Clique em **Commit changes**. **Não envie** a pasta `tests` nem arquivos `.json`.
+6. **Streamlit:** **Manage app → ⋮ → Reboot app**.
+7. **Conferir:**
+   - Entre com cada uma das 3 senhas e veja se o menu muda (o vendedor não vê Relatórios nem Produtos).
+   - O cabeçalho mostra **"Planilha conectada"**.
+   - Faça uma venda de teste, confira na aba Vendas e cancele com a senha da dona.
+
+Se aparecer **"senha da ponte errada"**, a senha dos Secrets não é igual à propriedade `SENHA` do Apps Script.
+
+## Rodar no computador (teste)
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Sem `[ponte]` nos Secrets, o app grava na pasta `dados/` e mostra "Modo de teste". Para testar o login no computador, crie o arquivo `.streamlit/secrets.toml` com a seção `[acessos]`.
+
+Testes automáticos (precisam do Node.js para o Google simulado):
+
+```bash
+pip install pytest
+python -m pytest tests/
+```
+
+## Como a venda é gravada
+
+- Cada venda recebe um **número único** na primeira tentativa. Se a internet ou o Google falharem, o carrinho continua na tela e a nova tentativa usa **o mesmo número**: a planilha não aceita duas vezes a mesma venda.
+- A ponte grava os itens e a venda **numa única chamada**, com trava (LockService), para as duas lojas não se atropelarem. Se a venda já existir, ela não grava de novo. Itens que já estavam lá também não são repetidos.
+- A tela só diz **"Venda concluída"** depois que a planilha confirma.
+- **Limite honesto:** o Google Planilhas não tem transação de verdade (tudo ou nada). Se o Google cair exatamente entre gravar os itens e gravar a venda, ficam itens sem venda. Esses itens **não contam** no estoque nem nos relatórios, e a nova tentativa, com o mesmo número, completa a venda.
 
 ## A planilha
-O app cria 5 abas na planilha:
-| Aba | O que guarda |
-|---|---|
-| **Produtos** | id, nome, código, custo, preço, ativo |
-| **Vendas** | uma linha por venda: data, loja, vendedor, forma, total, troco, status |
-| **Itens** | os produtos de cada venda |
-| **Entradas** | mercadoria que chegou e acertos de estoque |
-| **Caixa** | abertura, sangria, reforço e fechamento de cada loja |
 
-Na primeira vez que o app abrir, a aba Produtos recebe os **247 produtos** automaticamente.
-O estoque é a soma das Entradas menos o que foi vendido, e é calculado sozinho.
+As cinco abas (Produtos, Vendas, Itens, Entradas e Caixa) e a ordem das colunas **não mudaram**. Não apague e não mude a ordem das colunas. Filtrar e copiar pode à vontade.
 
-> Não apague nem mude a ordem das colunas na planilha. Pode filtrar e copiar à vontade.
+O estoque é calculado assim: Entradas (inclusive acertos) menos os Itens das vendas que não foram canceladas. Venda cancelada devolve as peças ao estoque.
 
----
+## Logomarca nova
 
-## Passo a passo para colocar online (grátis)
+Quando chegar a logomarca do app:
+1. Troque o `logo.png` por ela (PNG quadrado, de preferência 1024 × 1024).
+2. Rode `python ferramentas/gerar_marca.py`.
+3. Suba a pasta `marca` de novo.
 
-### 1. Criar a planilha
-1. Acesse **sheets.google.com** e crie uma planilha em branco chamada `Caixa Jardim do Éden`.
-2. Copie o endereço dela na barra do navegador (`https://docs.google.com/spreadsheets/d/.../edit`).
-
-### 2. Criar a "conta de serviço" (é o login que o app usa para gravar na planilha)
-1. Acesse **console.cloud.google.com** e crie um projeto, por exemplo `jardim-do-eden`.
-2. Em **APIs e serviços → Biblioteca**, ative a **Google Sheets API** e a **Google Drive API**.
-3. Em **APIs e serviços → Credenciais**, clique em **Criar credenciais → Conta de serviço**, dê um nome e conclua.
-4. Clique na conta criada, vá em **Chaves → Adicionar chave → Criar nova chave → JSON**. Um arquivo `.json` será baixado.
-5. Abra o `.json` e copie o e-mail que aparece em `client_email` (termina em `iam.gserviceaccount.com`).
-6. Volte à planilha, clique em **Compartilhar**, cole esse e-mail e dê permissão de **Editor**.
-
-### 3. Subir o código no GitHub
-1. Crie uma conta em **github.com** e um repositório novo, de preferência **privado**, chamado `caixa-jardim`.
-2. Clique em **Add file → Upload files** e envie: `app.py`, `requirements.txt`, `produtos_iniciais.csv`, `logo.png` e a pasta `.streamlit` com o `config.toml`.
-   **Não envie** o `secrets.toml` nem o arquivo `.json`.
-
-### 4. Publicar no Streamlit Community Cloud
-1. Acesse **share.streamlit.io** e entre com a conta do GitHub.
-2. Clique em **Create app**, escolha o repositório `caixa-jardim` e o arquivo `app.py`. Se quiser, escolha um endereço, por exemplo `jardim-do-eden.streamlit.app`.
-3. Antes de publicar, abra **Advanced settings → Secrets** e cole o conteúdo de `.streamlit/secrets.toml.exemplo` já preenchido:
-   - o endereço da planilha;
-   - os campos do arquivo `.json`, um por um. No `private_key`, copie o valor inteiro, com os `\n`.
-4. Clique em **Deploy**. Em 1 a 2 minutos o app está no ar.
-5. Entre numa loja com a senha, faça uma venda de teste e confira se ela apareceu nas abas **Vendas** e **Itens** da planilha.
-
-### 5. Usar nas lojas
-- Abra o endereço do app no computador ou celular de cada loja e escolha a loja no topo da tela.
-- Leitor de código de barras USB: clique na caixa de busca e passe o produto. O leitor "digita" o código e aperta Enter sozinho.
-- Para cadastrar o código de barras de um produto, vá em **Produtos**, coloque o código na coluna "Código" e clique em **Salvar**.
-
----
-
-## Bom saber
-- **O app "dorme"** se ficar uns dias sem uso. O primeiro acesso depois disso demora cerca de 30 segundos para acordar. Os dados não se perdem, porque estão na planilha.
-- **Mais usuários:** em *Secrets*, acrescente linhas em `[usuarios]`, por exemplo `daiane = "senha-dela"`. Quem não estiver em `[papeis]` como `"dona"` entra como vendedora.
-- **Sair** apaga o login daquele aparelho. Em computador que outras pessoas usam, clique em **Sair** no fim do dia.
-- **Atualizar os dados:** quem está numa loja vê as vendas da outra em até 1 minuto. Para ver na hora, use o menu do usuário → **Atualizar dados**.
-- **Testar no computador sem a planilha:** rode `pip install -r requirements.txt` e depois `streamlit run app.py`. Sem os Secrets, o app grava na pasta `dados/` e mostra o aviso "Modo de teste".
+Os arquivos são reduzidos sem distorcer a imagem.
