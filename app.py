@@ -95,10 +95,16 @@ ESTOQUE_BAIXO = 2  # até quantas peças o produto entra em "estoque baixo"
 VERMELHO, PRETO, DOURADO, BORDO, CREME, BRANCO = "#A50924", "#111111", "#C6A15B", "#581525", "#FBF6EC", "#FFFFFF"
 
 
+def _achar(nome):
+    """Arquivo de imagem na pasta marca/ ou solto ao lado do app.py (subir sem pasta no GitHub também vale)."""
+    for c in (os.path.join(PASTA, nome), os.path.join(PASTA, os.path.basename(nome))):
+        if os.path.exists(c):
+            return c
+    return None
+
+
 def _img64(nome, reserva="logo.png"):
-    caminho = os.path.join(PASTA, nome)
-    if not os.path.exists(caminho):
-        caminho = os.path.join(PASTA, reserva)
+    caminho = _achar(nome) or os.path.join(PASTA, reserva)
     with open(caminho, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
@@ -2032,7 +2038,3 @@ def tela_hoje(loja):
         if real.empty:
             st.caption("Nenhuma venda pelo caixa ainda hoje.")
         else:
-            hora = real.groupby(real["dt"].dt.hour)["total"].sum().reset_index()
-            hora.columns = ["h", "total"]
-            hora["Hora"] = hora["h"].map(lambda x: f"{int(x):02d}h")
-            grafico(hora, "Ho
