@@ -1,0 +1,18 @@
+# Configuração do Caixa Jardim do Éden (o app lê daqui quando não acha nos Secrets do Streamlit).
+# ATENÇÃO: este arquivo tem senhas. O repositório do GitHub precisa ser PRIVADO.
+
+[ponte]
+url = "https://script.google.com/macros/s/AKfycbxuhOWd4HEnyNQq5lKKje_zltS7_w2rtJ8jP86I9btosdjnC5ioGpkTacHS2hV6bm-C/exec"
+senha = "GlCwzcL08WD8IkmkcmBgKWi0G1d9-cU-moqG9-SDZGU"
+senha_antiga = "MVaKj1M0Ei8-itI0taqBYfKOD5ZVfY4Z"
+
+[acessos]
+dona = "Eden-Dona-4827"
+gerente = "Eden-Gerente-6153"
+vendedor = "Eden-Venda-3971"
+
+[app]
+chave = "KL-xTJ3B3H1hy0XTdfqnCdFFn74dPc5KVKYn7ECkLlMW2w0MbBizRA"
+
+[planilha]
+endereco = "https://docs.google.com/spreadsheets/d/1i1cdwOjcv0kjQsaAHCYbmdkDBCMq2qi74zlG4namLmM/edit"
